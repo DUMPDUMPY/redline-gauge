@@ -8,7 +8,7 @@
 #define RPM_MAX           12000    // full scale of the 13-slot shift bar
 #define RPM_SHIFT          7000    // shift light: bar flashes, LED red, beep
 #define RPM_IDLE            850    // simulator idle
-#define RPM_DISPLAY_STEP     50    // big RPM number is rounded to this (reduces flicker)
+#define RPM_DISPLAY_STEP     10    // big RPM number is rounded to this (reduces flicker; upstream 50)
 
 // ---- Warning thresholds (value turns yellow = warn, red + blink = critical) --
 #define COOLANT_COLD         60    // below: shown blue (engine not warm yet)

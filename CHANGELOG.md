@@ -25,6 +25,7 @@ new features bump the middle number, fixes the last one.
 - THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
 - Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
 - THROTTLE panel shows one decimal (4.7 %, not 5 %).
+- Big RPM number rounded to 10 (`RPM_DISPLAY_STEP`, upstream 50).
 - Automatic-gearbox gear tracking (`GEAR_HOLD 1`): when the converter slips or the engine idles while rolling
   (lifting off at low speed) the last gear is held instead of showing N, pulling away from a stop shows 1st, the
   held gear steps down / up with speed, an idle-coasting "match" (800 rpm at 25 km/h looks like 4th) is ignored,
