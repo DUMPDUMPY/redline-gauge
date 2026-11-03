@@ -89,7 +89,7 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     // motion without visible lag. Falling edge slightly slower, like a real needle.
     rpmSmooth_ = approach(rpmSmooth_, rpm, dt, rpm > rpmSmooth_ ? 60.0f : 90.0f);
     v.rpmBar = rpmSmooth_;
-    v.rpmText = (int)(rpmSmooth_ / RPM_DISPLAY_STEP + 0.5f) * RPM_DISPLAY_STEP;
+    v.rpmText = (int)(rpmSmooth_ / rpmStep_ + 0.5f) * rpmStep_;
     if (v.rpmText > 99999) v.rpmText = 99999;
 
     if (rpmSmooth_ >= peak_) { peak_ = rpmSmooth_; peakAt_ = now; }

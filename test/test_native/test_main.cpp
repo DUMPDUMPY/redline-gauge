@@ -99,6 +99,7 @@ static void test_fonts_cover_every_ui_string() {
     TEST_ASSERT_TRUE(fontHas(font_value, "0123456789.-"));
     TEST_ASSERT_TRUE(fontHas(font_label, "SPEED " PANEL1_LABEL PANEL2_LABEL PANEL3_LABEL
                                          "FUEL RATE STFT LTFT MAP IGN ADV O2 SENSOR LOAD THR PED ACT 0123456789ABC"));
+    TEST_ASSERT_TRUE(fontHas(font_small, "SETUP DASHBOARD BACK GEAR AUTO OFF HIDES THE RPM STEP 10 25 50 BIG NUMBER ROUNDS TO THIS BAR AND PEAK ARE NOT"));
     TEST_ASSERT_TRUE(fontHas(font_small, "ENGINE SPEED PEAK RPM km/h GEAR °C V SETUP " STATUS_TITLE
                                          "BEEP ON OFF RESET THEME DATA SOURCE SHIFT LIGHT BRIGHTNESS % kW L/h KPA DEG mV"));
     for (int i = 0; i < PANELS_COUNT; i++) TEST_ASSERT_TRUE(fontHas(font_small, settings_ui::kPanelLabels[i]));
@@ -1245,16 +1246,56 @@ static void test_settings_taps() {
     TEST_ASSERT_EQUAL_UINT8(PANELS_HYBRID, s.panels);
     settings_ui::tap(159, 229, s);
     TEST_ASSERT_EQUAL_UINT8(PANELS_AUTO, s.panels);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(220, 229, s));  // GEAR
-    TEST_ASSERT_EQUAL_UINT8(GEARMODE_OFF, s.gearMode);
-    settings_ui::tap(220, 229, s);
     TEST_ASSERT_EQUAL_UINT8(GEARMODE_AUTO, s.gearMode);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(220, 229, s));     // SETUP: opens the dashboard page ...
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(120, 81, s));   // ... GEAR OFF
+    TEST_ASSERT_EQUAL_UINT8(GEARMODE_OFF, s.gearMode);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(120, 81, s));      // already off: no-op
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(44, 81, s));    // GEAR AUTO
+    TEST_ASSERT_EQUAL_UINT8(GEARMODE_AUTO, s.gearMode);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(120, 135, s));  // RPM STEP 25
+    TEST_ASSERT_EQUAL_UINT8(25, s.rpmStep);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(196, 135, s));  // RPM STEP 50
+    TEST_ASSERT_EQUAL_UINT8(50, s.rpmStep);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(44, 135, s));   // RPM STEP 10
+    TEST_ASSERT_EQUAL_UINT8(10, s.rpmStep);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(280, 14, s)); // BACK (same spot as DONE)
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(280, 14, s));     // main page again: DONE closes
     TEST_ASSERT_EQUAL_UINT8(2, s.klineUart);
     TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(282, 229, s));  // K-UART toggles
     TEST_ASSERT_EQUAL_UINT8(0, s.klineUart);
     settings_ui::tap(282, 229, s);
     TEST_ASSERT_EQUAL_UINT8(2, s.klineUart);
     TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(160, 144, s));     // between theme names and sources
+}
+
+static void test_rpm_step() {
+    GaugeModel m;
+    GaugeView v = {};
+    m.reset(5000);
+    bus::clear();
+    g_host_ms = 5000;
+    auto settleAt = [&](float rpm) {
+        for (int i = 0; i < 90; i++) {
+            g_host_ms += 33;
+            bus::publish(CH_RPM, rpm);
+            GaugeSnapshot s;
+            bus::snapshot(s);
+            m.update(s, g_host_ms, "TEST", v);
+        }
+    };
+    m.setRpmStep(10);
+    settleAt(4237);
+    TEST_ASSERT_EQUAL_INT(4240, v.rpmText);
+    m.setRpmStep(25);
+    settleAt(4237);
+    TEST_ASSERT_EQUAL_INT(4225, v.rpmText);
+    m.setRpmStep(50);
+    settleAt(4237);
+    TEST_ASSERT_EQUAL_INT(4250, v.rpmText);
+    m.setRpmStep(0);                                                   // nonsense: the build default
+    settleAt(4237);
+    TEST_ASSERT_EQUAL_INT((int)(4237 / (float)RPM_DISPLAY_STEP + 0.5f) * RPM_DISPLAY_STEP, v.rpmText);
 }
 
 static void test_settings_limits() {
@@ -1324,6 +1365,7 @@ int main(int, char **) {
     RUN_TEST(test_theme_switch_repaints_whole_screen);
     RUN_TEST(test_splash_renders_every_theme);
     RUN_TEST(test_settings_taps);
+    RUN_TEST(test_rpm_step);
     RUN_TEST(test_settings_limits);
     return UNITY_END();
 }

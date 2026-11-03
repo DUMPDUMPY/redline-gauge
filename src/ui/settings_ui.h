@@ -1,6 +1,7 @@
 #pragma once
 // Full-screen settings page: theme (with live thumbnails), data source,
-// shift-light RPM, backlight brightness, beep on/off, reset peak.
+// shift-light RPM, backlight brightness, beep on/off, reset peak. The SETUP button opens a second page,
+// SETUP DASHBOARD (gear display AUTO / OFF, RPM step 10 / 25 / 50), with BACK to return.
 // Opened from the SETUP button (or by tapping the status bar).
 #include "settings.h"
 
@@ -17,6 +18,7 @@ enum Action : uint8_t {
 // Source names shown on the buttons, indexed by SourceId.
 extern const char *const kSourceLabels[SRC_COUNT];
 extern const char *const kPanelLabels[PANELS_COUNT];
+extern const uint8_t kRpmSteps[3];             // the RPM STEP choices on the SETUP DASHBOARD page
 
 void   draw(const Settings &s);                 // full repaint (open / after a change)
 Action tap(int x, int y, Settings &s);          // handle a tap; edits s, repaints if needed

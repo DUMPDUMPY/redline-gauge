@@ -33,7 +33,13 @@ static const Rect R_BRI_UP   = { 276, 194, 26, 22 };
 static const Rect R_BEEP     = {   8, 221, 58, 17 };
 static const Rect R_PEAK     = {  69, 221, 58, 17 };
 static const Rect R_PANELS   = { 130, 221, 58, 17 };
-static const Rect R_GEAR     = { 191, 221, 58, 17 };
+static const Rect R_SETUP    = { 191, 221, 58, 17 };   // opens the SETUP DASHBOARD page (GEAR, RPM STEP)
+// SETUP DASHBOARD page
+static const Rect R_BACK     = { 250,   4, 64, 22 };   // same place as DONE
+static const Rect R_GEAR_AUTO = {   8,  70, 72, 22 };
+static const Rect R_GEAR_OFF  = {  84,  70, 72, 22 };
+static Rect rpmStepBtn(int i) { return { 8 + i * 76, 124, 72, 22 }; }
+const uint8_t kRpmSteps[3] = { 10, 25, 50 };
 static const Rect R_KUART    = { 252, 221, 60, 17 };
 const char *const kPanelLabels[PANELS_COUNT] = { "PANEL AUTO", "PANEL STD", "PANEL HYB" };
 
@@ -90,11 +96,36 @@ static void themeThumb(Canvas &cv, const Theme &cur, int i, bool selected) {
 }
 
 static bool s_peakCleared = false;     // RESET PEAK feedback, until the next tap / redraw
+static bool s_setupPage = false;       // the SETUP DASHBOARD page instead of the main settings page
+
+// SETUP DASHBOARD: how the gauge itself reads (gear display, RPM rounding)
+static void composeSetup(Canvas &cv, const Settings &s) {
+    const Theme &t = kThemes[s.theme];
+    cv.text(font_small, 12, 20, "SETUP DASHBOARD", C(t.accentBright), ALIGN_LEFT, 2);
+    button(cv, t, R_BACK, "BACK", true, font_small);
+    for (int x = 8; x < 312; x++)
+        cv.blendPixel(x, 30, C(t.accent), (uint8_t)(255 - (x - 8) * 200 / 304));
+
+    cv.text(font_small, 12, 52, "GEAR", C(C_MUTED), ALIGN_LEFT, 1);
+    button(cv, t, R_GEAR_AUTO, "AUTO", s.gearMode != GEARMODE_OFF, font_small);
+    button(cv, t, R_GEAR_OFF, "OFF", s.gearMode == GEARMODE_OFF, font_small);
+    cv.text(font_small, 164, 78, "OFF HIDES THE GEAR", C(C_MUTED), ALIGN_LEFT, 1);
+
+    cv.text(font_small, 12, 106, "RPM STEP", C(C_MUTED), ALIGN_LEFT, 1);
+    for (int i = 0; i < 3; i++) {
+        char lbl[8];
+        snprintf(lbl, sizeof lbl, "%d", kRpmSteps[i]);
+        button(cv, t, rpmStepBtn(i), lbl, s.rpmStep == kRpmSteps[i], font_small);
+    }
+    cv.text(font_small, 12, 156, "THE BIG RPM NUMBER ROUNDS TO THIS", C(C_MUTED), ALIGN_LEFT, 1);
+    cv.text(font_small, 12, 170, "THE BAR AND PEAK ARE NOT ROUNDED", C(C_MUTED), ALIGN_LEFT, 1);
+}
 
 static void compose(Canvas &cv, const Settings &s) {
     const Theme &t = kThemes[s.theme];
     // backdrop: the theme's own art, darkened, so the page feels part of the gauge
     for (int i = 0; i < cv.w * cv.h; i++) cv.px[i] = blend565(215, 0, cv.px[i]);
+    if (s_setupPage) { composeSetup(cv, s); return; }
 
     cv.text(font_ui, 12, 20, "SETTINGS", C(t.accentBright), ALIGN_LEFT, 2);
     cv.text(font_small, 312, 41, "v" REDLINE_VERSION, C(C_MUTED), ALIGN_RIGHT);
@@ -130,7 +161,7 @@ static void compose(Canvas &cv, const Settings &s) {
     button(cv, t, R_BEEP, s.beep ? "BEEP ON" : "BEEP OFF", s.beep, font_small);
     button(cv, t, R_PEAK, s_peakCleared ? "CLEARED" : "RESET PEAK", s_peakCleared, font_small);
     button(cv, t, R_PANELS, kPanelLabels[s.panels < PANELS_COUNT ? s.panels : 0], s.panels != PANELS_AUTO, font_small);
-    button(cv, t, R_GEAR, s.gearMode == GEARMODE_OFF ? "GEAR OFF" : "GEAR AUTO", s.gearMode == GEARMODE_OFF, font_small);
+    button(cv, t, R_SETUP, "SETUP", false, font_small);
     button(cv, t, R_KUART, s.klineUart == 0 ? "K-UART 0" : "K-UART 2", s.klineUart == 0, font_small);
 }
 
@@ -148,9 +179,19 @@ void draw(const Settings &s) {
 
 Action tap(int x, int y, Settings &s) {
     Action a = ACT_NONE;
+    if (s_setupPage) {                                     // SETUP DASHBOARD
+        if (inside(R_BACK, x, y)) { s_setupPage = false; draw(s); return ACT_NONE; }
+        if (inside(R_GEAR_AUTO, x, y) && s.gearMode != GEARMODE_AUTO) { s.gearMode = GEARMODE_AUTO; a = ACT_CHANGED; }
+        if (inside(R_GEAR_OFF, x, y) && s.gearMode != GEARMODE_OFF) { s.gearMode = GEARMODE_OFF; a = ACT_CHANGED; }
+        for (int i = 0; i < 3; i++)
+            if (inside(rpmStepBtn(i), x, y) && s.rpmStep != kRpmSteps[i]) { s.rpmStep = kRpmSteps[i]; a = ACT_CHANGED; }
+        if (a == ACT_CHANGED) draw(s);
+        return a;
+    }
     bool wasCleared = s_peakCleared;
     s_peakCleared = false;
     if (inside(R_DONE, x, y)) return ACT_CLOSE;
+    if (inside(R_SETUP, x, y)) { s_setupPage = true; draw(s); return ACT_NONE; }
     // checked before the neighbouring buttons, so a tap on an edge can't change both
     if (inside(R_PEAK, x, y)) {
         s_peakCleared = true;
@@ -175,7 +216,6 @@ Action tap(int x, int y, Settings &s) {
 #endif
     if (inside(R_BEEP, x, y)) { s.beep = !s.beep; a = ACT_CHANGED; }
     if (inside(R_PANELS, x, y)) { s.panels = (s.panels + 1) % PANELS_COUNT; a = ACT_CHANGED; }
-    if (inside(R_GEAR, x, y)) { s.gearMode = (s.gearMode + 1) % GEARMODE_COUNT; a = ACT_CHANGED; }
     if (inside(R_KUART, x, y)) { s.klineUart = s.klineUart == 0 ? 2 : 0; a = ACT_CHANGED; }
     if (a == ACT_CHANGED || wasCleared) draw(s);
     return a;

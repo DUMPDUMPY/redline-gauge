@@ -86,7 +86,9 @@ If the splash is removed or the logo is changed, the status bar shows `UNOFFICIA
   RPM while it is down. Tap the pill for the link page: what to check, next retry, uptime, replies per second,
   last reply, links / drops, plus K-line echo / O2 / AFR or the Bluetooth adapter / PIDs.
 - **COLORS**: flips the panel colours (inverted / normal) and saves it, for when the screen shows a white background after flashing.
-- **GEAR AUTO / OFF**: OFF hides the gear box — use it on hybrids and CVTs, where an estimated gear means nothing
+- **SETUP** opens the SETUP DASHBOARD page (BACK returns): **GEAR AUTO / OFF** and **RPM STEP 10 / 25 / 50**
+  (the big RPM number rounds to it; the bar and peak are not rounded; serial `rpmstep=10|25|50`).
+  GEAR OFF hides the gear box — use it on hybrids and CVTs, where an estimated gear means nothing
 
 Every value is saved in NVS and restored after a reboot.
 

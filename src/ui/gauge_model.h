@@ -57,6 +57,7 @@ public:
     void setShiftRpm(int rpm) { shiftRpm_ = rpm; }
     void setPanels(uint8_t set) { panels_ = set; }      // PanelSet
     void setGearHidden(bool off) { gearOff_ = off; }
+    void setRpmStep(int step) { rpmStep_ = step > 0 ? step : RPM_DISPLAY_STEP; }
     void update(const GaugeSnapshot &s, uint32_t now, const char *modeName, GaugeView &out);
 
 private:
@@ -68,6 +69,7 @@ private:
     int      shiftRpm_ = RPM_SHIFT;
     uint8_t  panels_ = 0;            // PANELS_AUTO
     bool     gearOff_ = false;
+    int      rpmStep_ = RPM_DISPLAY_STEP;   // big RPM number is rounded to this
     int      gear_ = 0;              // gear shown last frame (GEAR_HOLD)
     int      gearCand_ = 0;          // gear waiting to be confirmed
     uint32_t gearCandAt_ = 0;
