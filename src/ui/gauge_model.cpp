@@ -149,6 +149,7 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     v.tps = (int)lroundf(s.value[CH_THROTTLE]);
     if (v.tps < 0) v.tps = 0;
     if (v.tps > 100) v.tps = 100;
+    v.tpsF = s.value[CH_THROTTLE] < 0 ? 0 : s.value[CH_THROTTLE] > 100 ? 100 : s.value[CH_THROTTLE];
 
     v.fuelLevelValid = fresh(s, CH_FUEL_LEVEL, now);
     v.fuelLevel = (int)lroundf(s.value[CH_FUEL_LEVEL]);

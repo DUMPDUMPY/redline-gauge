@@ -470,8 +470,8 @@ static void drawItem(int i, uint8_t item, const GaugeView &v) {
         break;
     }
     case PI_THROTTLE:
-        snprintf(buf, sizeof buf, "%d", v.tps);
-        drawPanel(i, "THROTTLE", v.tpsValid, buf, "%", s_theme->accentBright, v.tps / 100.0f);
+        snprintf(buf, sizeof buf, v.tpsF < 99.95f ? "%.1f" : "%.0f", v.tpsF);     // one decimal: no visible rounding
+        drawPanel(i, "THROTTLE", v.tpsValid, buf, "%", s_theme->accentBright, v.tpsF / 100.0f);
         break;
     case PI_FUEL_LEVEL:
         snprintf(buf, sizeof buf, "%d", v.fuelLevel);

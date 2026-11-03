@@ -267,11 +267,13 @@ static void test_model_extra_telemetry_and_staleness() {
     s.value[CH_IGNITION] = 12.5f; s.stamp[CH_IGNITION] = g_host_ms;
     s.value[CH_O2_MV] = 450; s.stamp[CH_O2_MV] = g_host_ms;
     s.value[CH_LOAD] = 37.4f; s.stamp[CH_LOAD] = g_host_ms;
+    s.value[CH_THROTTLE] = 4.73f; s.stamp[CH_THROTTLE] = g_host_ms;
     s.value[CH_D49] = 19.2f; s.stamp[CH_D49] = g_host_ms;               // DEBUG throttle panels
     s.value[CH_D45] = 4.7f; s.stamp[CH_D45] = g_host_ms;
     m.update(s, g_host_ms, "TEST", v);
     TEST_ASSERT_TRUE(v.loadValid);
     TEST_ASSERT_EQUAL_INT(37, v.load);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.73f, v.tpsF);                    // throttle keeps its decimals
     TEST_ASSERT_TRUE(v.dbgValid[PI_D49 - PI_D11]);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 19.2f, v.dbg[PI_D49 - PI_D11]);
     TEST_ASSERT_TRUE(v.dbgValid[PI_D45 - PI_D11]);

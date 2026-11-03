@@ -27,6 +27,7 @@ struct GaugeView {
     bool  iatValid;   int   iat;     Level iatLvl;
     bool  afrValid;   float afr;     Level afrLvl;   // LV_WARN = rich, LV_COLD = lean
     bool  tpsValid;   int   tps;     // throttle %
+    float tpsF;                      // throttle %, unrounded (the panel shows one decimal)
     bool  fuelLevelValid; int fuelLevel;
     bool  fuelRateValid;  float fuelRate;
     bool  stftValid;      float stft;
