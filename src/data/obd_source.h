@@ -68,6 +68,7 @@ private:
     bool scan(char *macOut);
     int  scanInto(BtDevice *out, int max);   // fill the list; returns count
     bool usable(int idx) const;
+    int  resolve(int idx) const;     // schedule entry -> the PID to send (THROTTLE: 0145 or 0111)
     void forgetBond(const char *mac);
     bool readPid(int idx);
 };

@@ -45,7 +45,12 @@ inline ObdResult obdParsePid(const char *resp, uint8_t pid, float &out) {
         case 0x0E: out = A * 0.5f - 64.0f; return OBD_OK;
         case 0x05:
         case 0x0F: out = A - 40.0f; return OBD_OK;
-        case 0x11: out = A * (100.0f / 255.0f); return OBD_OK;
+        case 0x11:
+        case 0x45:                                      // relative throttle
+        case 0x47:                                      // absolute throttle B
+        case 0x49:                                      // accelerator pedal D
+        case 0x4A:                                      // accelerator pedal E
+        case 0x4C: out = A * (100.0f / 255.0f); return OBD_OK;   // commanded throttle actuator
         case 0x14:
             if (obdHexByte(p + 6) < 0) return OBD_BAD;
             out = A * 5.0f;
@@ -165,6 +170,8 @@ inline uint32_t obdSupportedItems(const uint32_t pm[5]) {
         { PI_COOLANT, 0x05 }, { PI_INTAKE, 0x0F }, { PI_AFR, 0x34 }, { PI_THROTTLE, 0x11 },
         { PI_FUEL_LEVEL, 0x2F }, { PI_FUEL_RATE, 0x5E }, { PI_STFT, 0x06 }, { PI_LTFT, 0x07 },
         { PI_MAP, 0x0B }, { PI_IGNITION, 0x0E }, { PI_O2_MV, 0x14 }, { PI_LOAD, 0x04 },
+        { PI_THROTTLE, 0x45 },                          // (this build prefers the relative throttle PID)
+        { PI_D11, 0x11 }, { PI_D45, 0x45 }, { PI_D47, 0x47 }, { PI_D49, 0x49 }, { PI_D4A, 0x4A }, { PI_D4C, 0x4C },
     };
     uint32_t m = 1u << PI_VOLTAGE;
     for (auto &e : map) if (obdHasPid(pm, e.pid)) m |= 1u << e.item;

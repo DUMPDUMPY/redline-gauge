@@ -35,6 +35,7 @@ struct GaugeView {
     bool  ignitionValid;  float ignition;
     bool  o2MvValid;      int o2Mv;
     bool  loadValid;      int load;        // calculated engine load %
+    bool  dbgValid[6];    float dbg[6];    // DEBUG: raw throttle PIDs 0111 0145 0147 0149 014A 014C, %
     bool  hybrid;        // show the hybrid panel set (settings, or AUTO + data seen)
     bool  socValid;   int   soc;     Level socLvl;
     bool  kwValid;    float kw;

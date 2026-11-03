@@ -23,6 +23,13 @@ enum Channel : uint8_t {
     CH_IGNITION,    // ignition timing advance, deg
     CH_O2_MV,       // oxygen sensor voltage, mV
     CH_LOAD,        // calculated engine load, 0..100 % (OBD BT, PID 0104)
+    // DEBUG (OBD BT): every throttle-ish PID on its own channel, order = PI_D11 ... PI_D4C
+    CH_D11,         // 0111 throttle position
+    CH_D45,         // 0145 relative throttle position
+    CH_D47,         // 0147 absolute throttle position B
+    CH_D49,         // 0149 accelerator pedal position D
+    CH_D4A,         // 014A accelerator pedal position E
+    CH_D4C,         // 014C commanded throttle actuator
     CH_COUNT
 };
 

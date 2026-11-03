@@ -15,7 +15,9 @@ enum GearMode : uint8_t { GEARMODE_AUTO, GEARMODE_OFF, GEARMODE_COUNT };
 // What each right-hand panel shows; tap a panel to step to the next value that has data.
 enum PanelItem : uint8_t {
     PI_COOLANT, PI_VOLTAGE, PI_INTAKE, PI_AFR, PI_THROTTLE,
-    PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_LOAD, PI_COUNT
+    PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_LOAD,
+    PI_D11, PI_D45, PI_D47, PI_D49, PI_D4A, PI_D4C,   // DEBUG (Jazz GE build): one raw throttle/pedal PID each, OBD BT
+    PI_COUNT
 };
 
 struct Settings {

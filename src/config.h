@@ -51,10 +51,14 @@
 // gear = the ratio closest to  engine_rpm / wheel_rpm / FINAL_DRIVE.
 // Defaults are a typical 6-speed hatchback. GEAR_COUNT 0 = no estimate and the
 // simulator shows no gear; a source that sends gear= explicitly still shows it.
-#define GEAR_COUNT           6
-#define GEAR_RATIOS        { 3.636f, 2.235f, 1.521f, 1.137f, 0.891f, 0.707f }
-#define FINAL_DRIVE        4.06f
-#define TIRE_CIRCUMFERENCE_M 1.94f  // e.g. 205/55R16 ≈ 1.94 m
+// Set for a Honda Jazz / Fit GE8 1.5 with the 5-speed automatic and 175/65R15 tyres (ratios from the
+// owner; the US-market Fit 5AT lists the same box: 2.996 / 1.679 / 1.067 / 0.756 / 0.550, final 4.56).
+// Automatic: the estimate is only right while the torque converter is locked; during slip (pulling away,
+// hard throttle) it can show N or the wrong gear. Hide it on the SETUP page (GEAR OFF) if that bothers you.
+#define GEAR_COUNT           5
+#define GEAR_RATIOS        { 2.995f, 1.678f, 1.066f, 0.760f, 0.551f }
+#define FINAL_DRIVE        4.562f
+#define TIRE_CIRCUMFERENCE_M 1.91f  // 175/65R15 = 1.91 m (a 6-speed hatchback on 205/55R16 was 1.94 m)
 #define GEAR_TOLERANCE     0.12f    // ±12 % of a ratio still counts as that gear
 
 // ---- OBD-II over Bluetooth Classic (ELM327 "OBDII" dongles) -----------------
