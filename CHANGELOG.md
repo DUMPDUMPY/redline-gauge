@@ -24,6 +24,10 @@ new features bump the middle number, fixes the last one.
   `PED 0149`, `PED 014A`, `ACT 014C`. Tap through them to compare which one follows the pedal best.
 - THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
 - Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
+- Automatic-gearbox gear tracking (`GEAR_HOLD 1`): when the converter slips or the engine idles while rolling
+  (lifting off at low speed) the last gear is held instead of showing N, pulling away from a stop shows 1st, the
+  held gear steps down / up with speed, an idle-coasting "match" (800 rpm at 25 km/h looks like 4th) is ignored,
+  and a new gear is shown once it has been the estimate for 150 ms. N only when stopped.
 
 ## [1.9.0] - 2026-11-02
 
