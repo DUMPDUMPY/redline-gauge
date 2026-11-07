@@ -8,6 +8,10 @@ new features bump the middle number, fixes the last one.
 
 ### Added
 - **ENGINE LOAD panel** (`LOAD`, tap a right-hand panel): calculated engine load, OBD BT PID `0104`. Serial key `load=`.
+- **MAF panel** (`MAF`, G/S): mass air flow, OBD BT PID `0110` (the Jazz GE8 reports it). Serial key `maf=`.
+- **FUEL RATE from airflow** (this build): when the car doesn't report PID `015E` (the Jazz GE8 doesn't), the
+  rate is derived from MAF x the live AFR (stoich until one arrives), density `OBD_FUEL_DENSITY_G_PER_L` in
+  `config.h`. A reading outside 9.5–25 AFR (fuel cut, inactive sensor) publishes nothing and shows `--`.
 - **AFR over OBD BT**: PID `0134` (O2 sensor 1 equivalence ratio, lambda) x `OBD_AFR_STOICH` (14.7) feeds the
   existing AFR panel. On a car with a wideband (A/F) sensor this is a measurement; an inactive sensor (engine
   off, warming up) or a fuel cut reads about lambda 2.0 (29.4).
@@ -21,6 +25,8 @@ new features bump the middle number, fixes the last one.
 
 ### Debug / this build only (branch `jazzge`, not for upstream)
 - THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
+- The FUEL RATE panel shows **km/L** (speed / L-h, live; 0.0 while stopped) instead of L/h — the bus and
+  the serial `fuelrate=` value stay L/h.
 - Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
 - THROTTLE panel shows one decimal (4.7 %, not 5 %).
 - **SETUP DASHBOARD page** (SETTINGS -> SETUP, where the GEAR button was): GEAR AUTO / OFF moved in, plus a new

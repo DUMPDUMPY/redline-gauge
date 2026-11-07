@@ -61,6 +61,7 @@ private:
     uint8_t  macFails_ = 0;
     uint8_t  nodataRun_ = 0;         // consecutive NO DATA replies
     uint32_t pidMask_[5] = {};       // supported PIDs 01-A0 (0100, 0120 … 0180), [0] = 0: unknown
+    float    lastAfr_ = 0;           // last AFR reply (0 = none yet): feeds the MAF-derived fuel rate
 
     void retryIn(uint32_t ms, State then, const char *msg);
     bool elm(const char *cmd, uint32_t timeoutMs);

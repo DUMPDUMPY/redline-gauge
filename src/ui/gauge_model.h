@@ -36,6 +36,8 @@ struct GaugeView {
     bool  ignitionValid;  float ignition;
     bool  o2MvValid;      int o2Mv;
     bool  loadValid;      int load;        // calculated engine load %
+    bool  mafValid;       float maf;       // mass air flow, g/s
+    bool  kmlValid;       float kml;       // instant economy km/L: speed / fuel rate (0 when stopped)
     bool  hybrid;        // show the hybrid panel set (settings, or AUTO + data seen)
     bool  socValid;   int   soc;     Level socLvl;
     bool  kwValid;    float kw;

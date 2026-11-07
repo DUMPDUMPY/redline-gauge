@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "config.h"      // OBD_AFR_STOICH
+#include <math.h>       // NAN (obdMafFuelLph)
+#include "config.h"      // OBD_AFR_STOICH, OBD_FUEL_DENSITY_G_PER_L
 #include "settings.h"    // PanelItem
 
 enum ObdResult : uint8_t { OBD_OK, OBD_NODATA, OBD_BAD };
@@ -56,6 +57,12 @@ inline ObdResult obdParsePid(const char *resp, uint8_t pid, float &out) {
             out = A * 5.0f;
             return OBD_OK;
         case 0x2F: out = A * (100.0f / 255.0f); return OBD_OK;
+        case 0x10: {                                    // MAF air flow: (A*256+B)/100 g/s
+            int B = obdHexByte(p + 6);
+            if (B < 0) return OBD_BAD;
+            out = (A * 256 + B) / 100.0f;
+            return OBD_OK;
+        }
         case 0x34: {                                    // 41 34 A B C D: lambda = (A*256+B)/32768 -> AFR
             int B = obdHexByte(p + 6);                  // (C D = sensor current, not used)
             if (B < 0) return OBD_BAD;
@@ -79,6 +86,14 @@ inline ObdResult obdParseVolt(const char *resp, float &out) {
     if (v <= 5 || v >= 20) return OBD_BAD;
     out = v;
     return OBD_OK;
+}
+
+// Instant fuel rate from airflow: air g/s / AFR = fuel g/s -> L/h at OBD_FUEL_DENSITY_G_PER_L.
+// An AFR outside a sane band (inactive/warming wideband or fuel cut reads lambda ~2.0 = AFR 29.4)
+// gives NAN — the value then goes stale and the panel shows "--" instead of a wrong number.
+inline float obdMafFuelLph(float maf_gs, float afr) {
+    if (!(maf_gs > 0.0f) || afr < 9.5f || afr > 25.0f) return NAN;
+    return maf_gs * 3600.0f / (afr * OBD_FUEL_DENSITY_G_PER_L);
 }
 
 // ---- adapter selection (Bluetooth scan) ---------------------------------------------
@@ -170,10 +185,13 @@ inline uint32_t obdSupportedItems(const uint32_t pm[5]) {
         { PI_COOLANT, 0x05 }, { PI_INTAKE, 0x0F }, { PI_AFR, 0x34 }, { PI_THROTTLE, 0x11 },
         { PI_FUEL_LEVEL, 0x2F }, { PI_FUEL_RATE, 0x5E }, { PI_STFT, 0x06 }, { PI_LTFT, 0x07 },
         { PI_MAP, 0x0B }, { PI_IGNITION, 0x0E }, { PI_O2_MV, 0x14 }, { PI_LOAD, 0x04 },
+        { PI_MAF, 0x10 },
         { PI_THROTTLE, 0x45 },                          // (this build prefers the relative throttle PID)
     };
     uint32_t m = 1u << PI_VOLTAGE;
     for (auto &e : map) if (obdHasPid(pm, e.pid)) m |= 1u << e.item;
+    // FUEL RATE can also be derived from MAF x AFR when the car doesn't list 015E
+    if (!obdHasPid(pm, 0x5E) && obdHasPid(pm, 0x10)) m |= 1u << PI_FUEL_RATE;
     return m;
 }
 

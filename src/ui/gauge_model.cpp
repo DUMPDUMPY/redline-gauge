@@ -157,6 +157,8 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     if (v.fuelLevel > 100) v.fuelLevel = 100;
     v.fuelRateValid = fresh(s, CH_FUEL_RATE, now);
     v.fuelRate = s.value[CH_FUEL_RATE];
+    v.kmlValid = v.fuelRateValid && v.speedValid && v.fuelRate > 0.05f;
+    v.kml = v.kmlValid ? spd / v.fuelRate : 0;   // instant economy; 0 while stopped or burning nothing
     v.stftValid = fresh(s, CH_STFT, now);
     v.stft = s.value[CH_STFT];
     v.ltftValid = fresh(s, CH_LTFT, now);
@@ -171,6 +173,8 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     v.load = (int)lroundf(s.value[CH_LOAD]);
     if (v.load < 0) v.load = 0;
     if (v.load > 100) v.load = 100;
+    v.mafValid = fresh(s, CH_MAF, now);
+    v.maf = s.value[CH_MAF];
 
     v.socValid = fresh(s, CH_HV_SOC, now);
     v.soc = (int)lroundf(s.value[CH_HV_SOC]);

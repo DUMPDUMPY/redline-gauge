@@ -23,6 +23,7 @@ static const Key kKeys[] = {
     {"ign", CH_IGNITION}, {"ignition", CH_IGNITION}, {"advance", CH_IGNITION},
     {"o2", CH_O2_MV}, {"o2mv", CH_O2_MV}, {"o2_mv", CH_O2_MV},
     {"load", CH_LOAD},
+    {"maf", CH_MAF},
     {"soc", CH_HV_SOC}, {"hvsoc", CH_HV_SOC},
     {"kw", CH_HV_KW}, {"hvkw", CH_HV_KW},
 };

@@ -227,6 +227,12 @@ static void test_obd_parse() {
     TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("4114808000", 0x14, v));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 640, v);
     TEST_ASSERT_EQUAL(OBD_BAD, obdParsePid("411480", 0x14, v));
+    TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("41100320", 0x10, v));       // MAF: (3*256+32)/100 = 8.00 g/s
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, v);
+    TEST_ASSERT_EQUAL(OBD_BAD, obdParsePid("411003", 0x10, v));        // second byte missing
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.63f, obdMafFuelLph(8.0f, 14.7f));   // 8*3600/(14.7*745)
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8.0f, 29.4f)));              // fuel cut / inactive sensor: no value
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(0.0f, 14.7f)));
     TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("415E0100", 0x5E, v));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.8f, v);
     TEST_ASSERT_EQUAL(OBD_NODATA, obdParsePid("NODATA", 0x0C, v));
@@ -269,10 +275,16 @@ static void test_model_extra_telemetry_and_staleness() {
     s.value[CH_O2_MV] = 450; s.stamp[CH_O2_MV] = g_host_ms;
     s.value[CH_LOAD] = 37.4f; s.stamp[CH_LOAD] = g_host_ms;
     s.value[CH_THROTTLE] = 4.73f; s.stamp[CH_THROTTLE] = g_host_ms;
+    s.value[CH_SPEED] = 86; s.stamp[CH_SPEED] = g_host_ms;
+    s.value[CH_MAF] = 12.3f; s.stamp[CH_MAF] = g_host_ms;
     m.update(s, g_host_ms, "TEST", v);
     TEST_ASSERT_TRUE(v.loadValid);
     TEST_ASSERT_EQUAL_INT(37, v.load);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.73f, v.tpsF);                    // throttle keeps its decimals
+    TEST_ASSERT_TRUE(v.mafValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.3f, v.maf);
+    TEST_ASSERT_TRUE(v.kmlValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 86.0f / 2.4f, v.kml);               // speed / L/h
     TEST_ASSERT_TRUE(v.fuelLevelValid);
     TEST_ASSERT_EQUAL_INT(65, v.fuelLevel);
     TEST_ASSERT_TRUE(v.fuelRateValid);
@@ -814,11 +826,12 @@ static void test_extra_panel_items_are_selectable() {
     GaugeView v = {};
     v.afrValid = v.tpsValid = true;
     v.fuelLevelValid = v.fuelRateValid = v.stftValid = v.ltftValid = true;
-    v.mapValid = v.ignitionValid = v.o2MvValid = v.loadValid = true;
+    v.mapValid = v.ignitionValid = v.o2MvValid = v.loadValid = v.mafValid = true;
     uint8_t items[3] = { PI_COOLANT, PI_VOLTAGE, PI_INTAKE };
     gauge_ui::setPanelItems(items);
     const uint8_t expected[] = {
-        PI_AFR, PI_THROTTLE, PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_LOAD
+        PI_AFR, PI_THROTTLE, PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_LOAD,
+        PI_MAF
     };
     for (uint8_t item : expected) {
         uint8_t next = gauge_ui::nextPanelItem(2, v);
@@ -846,8 +859,9 @@ static void test_obd_polls_only_shown_items() {
     TEST_ASSERT_TRUE(obdHasPid(pm, 0x34));
     TEST_ASSERT_FALSE(obdHasPid(pm, 0x2F));
     const uint32_t jazz = (1u << PI_COOLANT) | (1u << PI_VOLTAGE) | (1u << PI_INTAKE) | (1u << PI_AFR) |
-                          (1u << PI_THROTTLE) | (1u << PI_STFT) | (1u << PI_MAP) | (1u << PI_IGNITION) | (1u << PI_LOAD);
-    TEST_ASSERT_EQUAL_HEX32(jazz, obdSupportedItems(pm));                   // no fuel level / rate, LTFT or O2 mV
+                          (1u << PI_THROTTLE) | (1u << PI_STFT) | (1u << PI_MAP) | (1u << PI_IGNITION) | (1u << PI_LOAD) |
+                          (1u << PI_MAF) | (1u << PI_FUEL_RATE);
+    TEST_ASSERT_EQUAL_HEX32(jazz, obdSupportedItems(pm));                   // no fuel level, LTFT or O2 mV; fuel rate derives from MAF
     uint32_t none[5] = {};
     TEST_ASSERT_EQUAL_HEX32((1u << PI_COUNT) - 1, obdSupportedItems(none));  // no bitmask: offer everything
 
@@ -878,10 +892,10 @@ static void test_obd_polls_only_shown_items() {
     TEST_ASSERT_EQUAL_UINT8(PI_AFR, gauge_ui::nextPanelItem(2, v, jazz));
     const uint8_t items2[3] = { PI_COOLANT, PI_VOLTAGE, PI_THROTTLE };
     gauge_ui::setPanelItems(items2);
-    TEST_ASSERT_EQUAL_UINT8(PI_STFT, gauge_ui::nextPanelItem(2, v, jazz));   // fuel level / rate: not on this car
+    TEST_ASSERT_EQUAL_UINT8(PI_FUEL_RATE, gauge_ui::nextPanelItem(2, v, jazz)); // fuel level: not on this car; rate is derived
     const uint8_t items3[3] = { PI_COOLANT, PI_VOLTAGE, PI_LOAD };
     gauge_ui::setPanelItems(items3);
-    TEST_ASSERT_EQUAL_UINT8(PI_INTAKE, gauge_ui::nextPanelItem(2, v, jazz)); // wraps past the shown COOLANT / VOLTAGE
+    TEST_ASSERT_EQUAL_UINT8(PI_MAF, gauge_ui::nextPanelItem(2, v, jazz));      // MAF follows LOAD
     gauge_ui::setPanelItems(shown);
 }
 

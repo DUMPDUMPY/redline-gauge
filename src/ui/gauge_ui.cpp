@@ -430,6 +430,7 @@ static bool itemValid(uint8_t item, const GaugeView &v) {
         case PI_IGNITION:   return v.ignitionValid;
         case PI_O2_MV:      return v.o2MvValid;
         case PI_LOAD:       return v.loadValid;
+        case PI_MAF:        return v.mafValid;
         default:            return false;   // PI_COUNT: not a panel value
     }
 }
@@ -468,8 +469,9 @@ static void drawItem(int i, uint8_t item, const GaugeView &v) {
         drawPanel(i, "FUEL", v.fuelLevelValid, buf, "%", s_theme->good, v.fuelLevel / 100.0f);
         break;
     case PI_FUEL_RATE:
-        snprintf(buf, sizeof buf, "%.1f", v.fuelRate);
-        drawPanel(i, "FUEL RATE", v.fuelRateValid, buf, "L/h", s_theme->accentBright, v.fuelRate / 100.0f);
+        // shown as instant economy (this build): km/L = speed / L-h. The bus/serial value stays L/h.
+        snprintf(buf, sizeof buf, "%.1f", v.kml);
+        drawPanel(i, "KM/L", v.kmlValid, buf, "", s_theme->accentBright, v.kml / 25.0f);
         break;
     case PI_STFT:
         snprintf(buf, sizeof buf, "%.1f", v.stft);
@@ -490,6 +492,10 @@ static void drawItem(int i, uint8_t item, const GaugeView &v) {
     case PI_O2_MV:
         snprintf(buf, sizeof buf, "%d", v.o2Mv);
         drawPanel(i, "O2 SENSOR", v.o2MvValid, buf, "mV", s_theme->accentBright, v.o2Mv / 1000.0f);
+        break;
+    case PI_MAF:
+        snprintf(buf, sizeof buf, v.maf < 99.95f ? "%.1f" : "%.0f", v.maf);
+        drawPanel(i, "MAF", v.mafValid, buf, "G/S", s_theme->accentBright, v.maf / 100.0f);
         break;
     default:
         snprintf(buf, sizeof buf, "%d", v.coolant);

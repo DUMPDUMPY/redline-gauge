@@ -23,6 +23,7 @@ enum Channel : uint8_t {
     CH_IGNITION,    // ignition timing advance, deg
     CH_O2_MV,       // oxygen sensor voltage, mV
     CH_LOAD,        // calculated engine load, 0..100 % (OBD BT, PID 0104)
+    CH_MAF,         // mass air flow, g/s (OBD BT, PID 0110)
     CH_COUNT
 };
 

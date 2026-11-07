@@ -80,6 +80,9 @@
 // OBD BT AFR panel: PID 0134 (O2 sensor 1 equivalence ratio, lambda) x this = air-fuel ratio.
 // 14.7 = petrol (what most apps use); gasohol E10 is closer to 14.1.
 #define OBD_AFR_STOICH     14.7f
+// Fuel rate derived from airflow (MAF 0110 / live AFR, g/s -> L/h) when the car doesn't report
+// PID 015E (e.g. the Jazz GE8). Petrol ~745 g/L; Thai gasohol E10 ~750 g/L.
+#define OBD_FUEL_DENSITY_G_PER_L 745.0f
 
 // ---- Serial input (USB) ------------------------------------------------------
 #define SERIAL_BAUD      115200

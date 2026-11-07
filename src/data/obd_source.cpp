@@ -212,7 +212,7 @@ bool ObdSource::scan(char *macOut) {
 // PIDs we read. Index order matters for noData_[] and the schedule below.
 enum {
     P_RPM, P_SPEED, P_COOLANT, P_IAT, P_VOLT, P_HV_SOC, P_HV,
-    P_TPS, P_FUEL_LEVEL, P_FUEL_RATE, P_STFT, P_LTFT, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD,
+    P_TPS, P_FUEL_LEVEL, P_FUEL_RATE, P_STFT, P_LTFT, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD, P_MAF,
     P_TPS_REL, P_COUNT
 };
 struct PidDef { const char *cmd; uint8_t pid; Channel ch; };
@@ -234,6 +234,7 @@ static const PidDef kPids[] = {
     {"0114", 0x14, CH_O2_MV},
     {"0134", 0x34, CH_AFR},         // O2 sensor 1 equivalence ratio (lambda) x 14.7 -> AFR
     {"0104", 0x04, CH_LOAD},        // calculated engine load
+    {"0110", 0x10, CH_MAF},         // mass air flow g/s; also the source of the derived fuel rate
     {"0145", 0x45, CH_THROTTLE},    // relative throttle: THROTTLE reads this instead of 0111 when the car has it
 };
 static_assert(sizeof kPids / sizeof kPids[0] == P_COUNT, "kPids / enum mismatch");
@@ -241,7 +242,7 @@ static_assert(P_COUNT <= ObdSource::kMaxPids, "ObdSource::noData_ is too small f
 // The right-hand panel item each PID feeds; PI_COUNT = not a panel value, always polled.
 static const uint8_t kPidItem[P_COUNT] = {
     PI_COUNT, PI_COUNT, PI_COOLANT, PI_INTAKE, PI_VOLTAGE, PI_COUNT, PI_COUNT,
-    PI_THROTTLE, PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_AFR, PI_LOAD,
+    PI_THROTTLE, PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_AFR, PI_LOAD, PI_MAF,
     PI_THROTTLE,
 };
 // RPM is polled on every other request. The requests in between walk through this list; entries the car
@@ -249,7 +250,7 @@ static const uint8_t kPidItem[P_COUNT] = {
 // slots. Speed and throttle come twice per round.
 static const uint8_t kOthers[] = {
     P_SPEED, P_TPS, P_COOLANT, P_IAT, P_VOLT, P_FUEL_LEVEL, P_FUEL_RATE, P_STFT, P_LTFT,
-    P_SPEED, P_TPS, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD, P_HV, P_HV_SOC,
+    P_SPEED, P_TPS, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD, P_MAF, P_HV, P_HV_SOC,
 };
 
 void ObdSource::retryIn(uint32_t ms, State then, const char *msg) {
@@ -338,7 +339,15 @@ bool ObdSource::readPid(int idx) {
         }
     }
     switch (obdParsePid(resp_, d.pid, v)) {
-        case OBD_OK:     noData_[idx] = 0; nodataRun_ = 0; bus::publish(d.ch, v); return true;
+        case OBD_OK:     noData_[idx] = 0; nodataRun_ = 0; bus::publish(d.ch, v);
+                         if (d.ch == CH_AFR) lastAfr_ = v;
+                         if (d.ch == CH_MAF && pidMask_[0] && !obdHasPid(pidMask_, 0x5E)) {
+                             // car has no 015E: fuel rate from airflow x the live AFR (stoich until one arrives)
+                             float afr = lastAfr_ > 0 ? lastAfr_ : OBD_AFR_STOICH;
+                             float lph = obdMafFuelLph(v, afr);
+                             if (!isnan(lph)) bus::publish(CH_FUEL_RATE, lph);
+                         }
+                         return true;
         case OBD_NODATA: if (noData_[idx] < 255) noData_[idx]++;
                          if (nodataRun_ < 255) nodataRun_++;
                          return true;
@@ -356,6 +365,10 @@ void ObdSource::forgetBond(const char *mac) {
 
 // Without a 0100 bitmask (some ECUs answer it oddly) fall back to the NO DATA counter.
 bool ObdSource::usable(int idx) const {
+    if (idx == P_FUEL_RATE && pidMask_[0] && !obdHasPid(pidMask_, 0x5E)) {
+        // no 015E on this car: the rate is derived from MAF x AFR (resolve() sends 0110 instead)
+        return obdItemWanted(s_want, PI_FUEL_RATE) && obdHasPid(pidMask_, 0x10);
+    }
     if (!obdItemWanted(s_want, kPidItem[idx])) return false;   // no panel shows it
     uint8_t pid = kPids[idx].pid;
     if (pid == 0) return true;                             // ATRV is the adapter itself
@@ -367,8 +380,12 @@ bool ObdSource::usable(int idx) const {
 }
 
 // P_TPS (THROTTLE) sends 0145 (relative, 0 % when closed) when the car lists it, else 0111.
+// P_FUEL_RATE asks the MAF PID instead when the car doesn't list 015E (readPid derives the rate).
 int ObdSource::resolve(int idx) const {
-    return (idx == P_TPS && pidMask_[0] && obdHasPid(pidMask_, 0x45)) ? P_TPS_REL : idx;
+    if (idx == P_TPS && pidMask_[0] && obdHasPid(pidMask_, 0x45)) return P_TPS_REL;
+    if (idx == P_FUEL_RATE && pidMask_[0] && !obdHasPid(pidMask_, 0x5E) && obdHasPid(pidMask_, 0x10))
+        return P_MAF;
+    return idx;
 }
 
 void ObdSource::poll() {
