@@ -143,7 +143,7 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
         afrSeen_ = true;
     }
     v.afr = afrSmooth_;
-    v.afrLvl = v.afr < AFR_RICH ? LV_WARN : v.afr > AFR_LEAN ? LV_COLD : LV_NORMAL;
+    v.afrLvl = v.afr < stoich_ * AFR_RICH_LAMBDA ? LV_WARN : v.afr > stoich_ * AFR_LEAN_LAMBDA ? LV_COLD : LV_NORMAL;
 
     v.tpsValid = fresh(s, CH_THROTTLE, now);
     v.tps = (int)lroundf(s.value[CH_THROTTLE]);
@@ -155,10 +155,10 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     v.fuelLevel = (int)lroundf(s.value[CH_FUEL_LEVEL]);
     if (v.fuelLevel < 0) v.fuelLevel = 0;
     if (v.fuelLevel > 100) v.fuelLevel = 100;
-    v.fuelRateValid = fresh(s, CH_FUEL_RATE, now);
+    v.fuelRateValid = fresh(s, CH_FUEL_RATE, now) && isfinite(s.value[CH_FUEL_RATE]) && s.value[CH_FUEL_RATE] >= 0;
     v.fuelRate = s.value[CH_FUEL_RATE];
-    v.kmlValid = v.fuelRateValid && v.speedValid && v.fuelRate > 0.05f;
-    v.kml = v.kmlValid ? spd / v.fuelRate : 0;   // instant economy; 0 while stopped or burning nothing
+    v.kmlValid = v.fuelRateValid && v.speedValid && isfinite(spd) && spd >= 0 && v.fuelRate > 0.05f;
+    v.kml = v.kmlValid ? spd / v.fuelRate : 0;   // 0 km/L while idling; zero/unknown fuel rate is "--"
     v.stftValid = fresh(s, CH_STFT, now);
     v.stft = s.value[CH_STFT];
     v.ltftValid = fresh(s, CH_LTFT, now);

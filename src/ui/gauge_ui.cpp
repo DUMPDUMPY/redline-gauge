@@ -414,6 +414,7 @@ static const char *s_regionKey(int rg) { return s_key[rg]; }
 
 // ---- selectable panel values ------------------------------------------------------------------
 static uint8_t s_items[3] = { PI_COOLANT, PI_VOLTAGE, PI_INTAKE };
+static float s_afrStoich = OBD_AFR_STOICH;   // setFuelStoich: the AFR bar range scales with the fuel
 
 static bool itemValid(uint8_t item, const GaugeView &v) {
     switch (item) {
@@ -456,8 +457,9 @@ static void drawItem(int i, uint8_t item, const GaugeView &v) {
         // narrowband estimate: the word says what it means, the number is a guide
         snprintf(buf, sizeof buf, "%.1f", v.afr);
         const char *unit = v.afrLvl == LV_WARN ? "RICH" : v.afrLvl == LV_COLD ? "LEAN" : "OK";
+        const float barMin = AFR_BAR_MIN_LAMBDA * s_afrStoich;
         drawPanel(i, "AFR", v.afrValid, buf, v.afrValid ? unit : "", levelColor(v.afrLvl, s_theme->good, v.blink),
-                  (v.afr - AFR_BAR_MIN) / (AFR_BAR_MAX - AFR_BAR_MIN));
+                  (v.afr - barMin) / ((AFR_BAR_MAX_LAMBDA - AFR_BAR_MIN_LAMBDA) * s_afrStoich));
         break;
     }
     case PI_THROTTLE:
@@ -576,6 +578,7 @@ bool hitStatus(int x, int y) { return y < 26 && x < 215; }
 void setPanelItems(const uint8_t items[3]) {
     for (int i = 0; i < 3; i++) s_items[i] = items[i] < PI_COUNT ? items[i] : PI_COOLANT;
 }
+void setFuelStoich(float stoich) { if (stoich > 8.0f && stoich < 20.0f) s_afrStoich = stoich; }
 
 int hitPanel(int x, int y, const GaugeView &v) {
     if (x < 222 || y >= 209) return -1;                // the SETUP button sits just below

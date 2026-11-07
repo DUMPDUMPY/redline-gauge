@@ -4,6 +4,7 @@
 // No drawing and no hardware here — runs identically on the ESP32 and on the host.
 #include <stdint.h>
 #include "config.h"
+#include "fuel.h"
 #include "data/gauge_bus.h"
 
 enum Level : uint8_t { LV_NORMAL, LV_COLD, LV_WARN, LV_CRIT };
@@ -59,6 +60,7 @@ public:
     void setPanels(uint8_t set) { panels_ = set; }      // PanelSet
     void setGearHidden(bool off) { gearOff_ = off; }
     void setRpmStep(int step) { rpmStep_ = step > 0 ? step : RPM_DISPLAY_STEP; }
+    void setFuel(uint8_t idx) { if (idx < FUEL_COUNT) stoich_ = kFuels[idx].stoich; }  // rich/lean follow the fuel
     void update(const GaugeSnapshot &s, uint32_t now, const char *modeName, GaugeView &out);
 
 private:
@@ -71,6 +73,7 @@ private:
     uint8_t  panels_ = 0;            // PANELS_AUTO
     bool     gearOff_ = false;
     int      rpmStep_ = RPM_DISPLAY_STEP;   // big RPM number is rounded to this
+    float    stoich_ = OBD_AFR_STOICH;      // fuel's stoich AFR (setFuel): rich/lean thresholds scale with it
     int      gear_ = 0;              // gear shown last frame (GEAR_HOLD)
     int      gearCand_ = 0;          // gear waiting to be confirmed
     uint32_t gearCandAt_ = 0;

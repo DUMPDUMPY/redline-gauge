@@ -79,16 +79,26 @@ If the splash is removed or the logo is changed, the status bar shows `UNOFFICIA
 - **PANEL AUTO / STD / HYB**: right-hand panels. STD = COOLANT · VOLTAGE · INTAKE; HYB = COOLANT · HV BATT (%) · HV POWER (kW, negative = regen);
   AUTO switches to HYB as soon as the source delivers hybrid battery data (e.g. OBD on a Honda e:HEV)
 - **Tap a right-hand panel** on the gauge to change what it shows: COOLANT, VOLTAGE, INTAKE, AFR (HONDA K, OBD BT),
-  THROTTLE, FUEL LEVEL, FUEL RATE, STFT, LTFT, MAP, IGN ADV, O2 SENSOR (mV), or LOAD (OBD BT). It skips values without fresh data
+  THROTTLE, FUEL LEVEL, KM/L, STFT, LTFT, MAP, IGN ADV, O2 SENSOR (mV), LOAD, or MAF (g/s, PID `0110`). It skips unsupported values
   and values already shown in another panel; the choice is saved. RPM, session PEAK RPM, and SPEED remain on the main display.
 - **Link pill** (HONDA K and OBD BT): the status bar shows `● ECU OK`, the connecting step (`BT PAIRING`,
   `ELM INIT` …) or a red `✕` with the reason and the seconds to the next try; **NOT CONNECTED** shows above the
   RPM while it is down. Tap the pill for the link page: what to check, next retry, uptime, replies per second,
   last reply, links / drops, plus K-line echo / O2 / AFR or the Bluetooth adapter / PIDs.
 - **COLORS**: flips the panel colours (inverted / normal) and saves it, for when the screen shows a white background after flashing.
-- **SETUP** opens the SETUP DASHBOARD page (BACK returns): **GEAR AUTO / OFF** and **RPM STEP 10 / 25 / 50**
+- **SETUP** opens the SETUP DASHBOARD page (BACK returns): **GEAR AUTO / OFF**, **RPM STEP 10 / 25 / 50**
   (the big RPM number rounds to it; the bar and peak are not rounded; serial `rpmstep=10|25|50`).
-  GEAR OFF hides the gear box — use it on hybrids and CVTs, where an estimated gear means nothing
+  GEAR OFF hides the gear box — use it on hybrids and CVTs, where an estimated gear means nothing.
+- **FUEL G91 / G95 / E10 / E20** (on SETUP DASHBOARD; default **E20**, saved; serial `fuel=e20`):
+  G91/G95 mean **gasohol 91/95**, both E10, not ethanol-free petrol. G91/G95/E10 use approximate stoich
+  AFR 14.1 and density 749 g/L; E20 uses 13.5 and 754 g/L. The choice scales OBD AFR and its rich/lean
+  thresholds and the MAF-based fuel estimate. Numeric `fuel=65` still sets the SERIAL fuel level.
+- **KM/L** replaces the FUEL RATE panel in this branch: speed / L/h, instantaneous (not a trip average).
+  Native PID `015E` wins; without it, estimate L/h from MAF / AFR and the selected fuel density.
+  MAF and lambda are polled as dependencies even with their panels hidden. If lambda is supported but
+  stale or saturated, the estimate expires to `--`; without a lambda PID, stoich is assumed.
+  Idling with a valid positive fuel rate shows 0.0 km/L; zero/unknown fuel rate or stale speed shows `--`.
+  **Estimated, not calibrated consumption**: do not treat it as a precise measurement or fuel-cut detector.
 
 Every value is saved in NVS and restored after a reboot.
 

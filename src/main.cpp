@@ -100,9 +100,11 @@ static void loadSettings() {
     settings.invert     = prefs.getBool("invert", settings.invert);
     uint8_t items[3];
     if (prefs.getBytesLength("pitems") == sizeof items && prefs.getBytes("pitems", items, sizeof items) == sizeof items)
-        for (int i = 0; i < 3; i++) if (items[i] < PI_COUNT) settings.panelItem[i] = items[i];
+        settings.restorePanelItems(items, prefs.getUChar("pitemv", 0));
     settings.rpmStep   = prefs.getUChar("rpmstep", settings.rpmStep);
     if (settings.rpmStep != 10 && settings.rpmStep != 25 && settings.rpmStep != 50) settings.rpmStep = RPM_DISPLAY_STEP;
+    settings.fuel      = prefs.getUChar("fuel", settings.fuel);
+    if (settings.fuel >= FUEL_COUNT) settings.fuel = FUEL_E20;
     settings.klineUart = prefs.getUChar("kuart", settings.klineUart);
     if (settings.klineUart != 0 && settings.klineUart != 2) settings.klineUart = 2;
     if (settings.panels >= PANELS_COUNT) settings.panels = PANELS_AUTO;
@@ -126,7 +128,9 @@ static void saveSettings() {   // Preferences only writes keys whose value chang
     uint8_t items[3];
     if (prefs.getBytes("pitems", items, sizeof items) != sizeof items || memcmp(items, settings.panelItem, sizeof items))
         prefs.putBytes("pitems", settings.panelItem, sizeof settings.panelItem);
+    prefs.putUChar("pitemv", Settings::kPanelSchema);
     prefs.putUChar("rpmstep", settings.rpmStep);
+    prefs.putUChar("fuel", settings.fuel);
     prefs.putUChar("kuart", settings.klineUart);
 }
 
@@ -162,7 +166,7 @@ static void printHelp() {
         "\n=== REDLINE " REDLINE_VERSION " — crafted by birdlab.th (birdlab.moomdate.tech) ===\n"
         "  mode=sim|touch|serial|obd|custom|honda   theme=ice|lime|amber   shift=7000\n"
         "  bright=20..100   beep=on|off   peak=reset   help\n"
-        "  panels=auto|standard|hybrid   gearmode=auto|off   rpmstep=10|25|50   invert=on|off (panel colours)\n"
+        "  panels=auto|standard|hybrid   gearmode=auto|off   rpmstep=10|25|50   fuel=g91|g95|e10|e20   invert=on|off (panel colours)\n"
         "  touchcal (or BOOT button)   touchcal=reset   touchcal=xmin,xmax,ymin,ymax,axis\n"
         "  timer   timerlog   timerlog=clear   kdump (HONDA K raw tables)   klineinvert=on|off\n"
         "  klineuart=2|0 (HONDA K pins: 2=GPIO22/27, 0=GPIO3/1 USB header; 0 turns the USB log off)\n"
@@ -255,6 +259,15 @@ static void handleLine(char *line) {
         int n = atoi(v);
         if (n == 10 || n == 25 || n == 50) s.rpmStep = (uint8_t)n;
         else { Serial.println("[gauge] rpmstep=10|25|50"); return; }
+    } else if (keyIs(p, "fuel", &v)) {               // what's in the tank
+        uint8_t found = fuelTypeFromKey(v);
+        if (found < FUEL_COUNT) s.fuel = found;
+        else {
+            char *end;
+            strtof(v, &end);
+            if (end != v) changed = false;  // preserve the existing fuel=65 SERIAL telemetry key
+            else { Serial.println("[gauge] fuel=g91|g95|e10|e20"); return; }
+        }
     } else if (keyIs(p, "beep", &v)) {
         s.beep = !strncasecmp(v, "on", 2) || *v == '1';
     } else if (keyIs(p, "obdpin", &v)) {
@@ -312,6 +325,7 @@ static void handleLine(char *line) {
 #if BACKLIGHT_DIMMING
         Serial.printf(" bright=%u%%", settings.brightness);
 #endif
+        Serial.printf(" fuel=%s", kFuels[settings.fuel < FUEL_COUNT ? settings.fuel : FUEL_E20].key);
         Serial.println();
         return;
     }
@@ -518,8 +532,11 @@ static void applySettings(const Settings &next, bool repaint) {
     model.setPanels(next.panels);
     model.setGearHidden(next.gearMode == GEARMODE_OFF);
     model.setRpmStep(next.rpmStep);
+    model.setFuel(next.fuel);
     gauge_ui::setPanelItems(next.panelItem);
+    gauge_ui::setFuelStoich(kFuels[next.fuel < FUEL_COUNT ? next.fuel : FUEL_E20].stoich);
     ObdSource::setShownItems(next.panelItem);
+    ObdSource::setFuel(next.fuel);
     if (next.klineUart != prev.klineUart) {
         HondaKSource::setUart(next.klineUart);
         if (activeSrc == SRC_HONDA) g_reinitSrc = true;   // reconnect on the new pins
@@ -844,8 +861,11 @@ void setup() {
     model.setPanels(settings.panels);
     model.setGearHidden(settings.gearMode == GEARMODE_OFF);
     model.setRpmStep(settings.rpmStep);
+    model.setFuel(settings.fuel);
     gauge_ui::setPanelItems(settings.panelItem);
+    gauge_ui::setFuelStoich(kFuels[settings.fuel].stoich);
     ObdSource::setShownItems(settings.panelItem);
+    ObdSource::setFuel(settings.fuel);
     HondaKSource::setUart(settings.klineUart);
     SimSource::hybrid = settings.panels == PANELS_HYBRID;
     requestedSrc = settings.source;

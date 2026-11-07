@@ -40,6 +40,7 @@ static const Rect R_GEAR_AUTO = {   8,  70, 72, 22 };
 static const Rect R_GEAR_OFF  = {  84,  70, 72, 22 };
 static Rect rpmStepBtn(int i) { return { 8 + i * 76, 124, 72, 22 }; }
 const uint8_t kRpmSteps[3] = { 10, 25, 50 };
+static Rect fuelBtn(int i)  { return { 8 + i * 76, 208, 72, 22 }; }   // G91 G95 E10 E20
 static const Rect R_KUART    = { 252, 221, 60, 17 };
 const char *const kPanelLabels[PANELS_COUNT] = { "PANEL AUTO", "PANEL STD", "PANEL HYB" };
 
@@ -119,6 +120,11 @@ static void composeSetup(Canvas &cv, const Settings &s) {
     }
     cv.text(font_small, 12, 156, "THE BIG RPM NUMBER ROUNDS TO THIS", C(C_MUTED), ALIGN_LEFT, 1);
     cv.text(font_small, 12, 170, "THE BAR AND PEAK ARE NOT ROUNDED", C(C_MUTED), ALIGN_LEFT, 1);
+
+    cv.text(font_small, 12, 196, "FUEL", C(C_MUTED), ALIGN_LEFT, 1);
+    cv.text(font_small, 312, 196, "G91/G95 = GASOHOL E10", C(C_MUTED), ALIGN_RIGHT, 1);
+    for (int i = 0; i < FUEL_COUNT; i++)
+        button(cv, t, fuelBtn(i), kFuels[i].label, s.fuel == i, font_small);
 }
 
 static void compose(Canvas &cv, const Settings &s) {
@@ -185,6 +191,8 @@ Action tap(int x, int y, Settings &s) {
         if (inside(R_GEAR_OFF, x, y) && s.gearMode != GEARMODE_OFF) { s.gearMode = GEARMODE_OFF; a = ACT_CHANGED; }
         for (int i = 0; i < 3; i++)
             if (inside(rpmStepBtn(i), x, y) && s.rpmStep != kRpmSteps[i]) { s.rpmStep = kRpmSteps[i]; a = ACT_CHANGED; }
+        for (int i = 0; i < FUEL_COUNT; i++)
+            if (inside(fuelBtn(i), x, y) && s.fuel != i) { s.fuel = i; a = ACT_CHANGED; }
         if (a == ACT_CHANGED) draw(s);
         return a;
     }

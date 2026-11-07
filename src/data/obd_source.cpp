@@ -3,6 +3,7 @@
 #include "data/obd_parse.h"
 #include "data/link_tracker.h"
 #include "config.h"
+#include "fuel.h"
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <Preferences.h>
@@ -85,6 +86,10 @@ static volatile uint32_t s_want = 0xFFFFFFFFu;   // PanelItem bits to poll (all,
 static volatile uint32_t s_supported = 0;        // PanelItem bits the car can fill (set after the ECU search)
 void ObdSource::setShownItems(const uint8_t items[3]) { s_want = obdWantMask(items); }
 uint32_t ObdSource::supportedItems() { return s_supported; }
+volatile uint8_t ObdSource::s_fuel = FUEL_E20;
+void ObdSource::setFuel(uint8_t fuel) {
+    if (fuel < FUEL_COUNT) s_fuel = fuel;
+}
 static volatile bool s_retarget = false;    // set by serial commands (core 1)
 static volatile bool s_forgetBond = false;  // obd=scan: also drop the pairing key
 static volatile uint32_t s_passkey = 1234;  // SSP passkey answer = the PIN being tried
@@ -232,7 +237,7 @@ static const PidDef kPids[] = {
     {"010B", 0x0B, CH_MAP},
     {"010E", 0x0E, CH_IGNITION},
     {"0114", 0x14, CH_O2_MV},
-    {"0134", 0x34, CH_AFR},         // O2 sensor 1 equivalence ratio (lambda) x 14.7 -> AFR
+    {"0134", 0x34, CH_AFR},         // O2 sensor 1 lambda x the selected fuel's stoich -> AFR
     {"0104", 0x04, CH_LOAD},        // calculated engine load
     {"0110", 0x10, CH_MAF},         // mass air flow g/s; also the source of the derived fuel rate
     {"0145", 0x45, CH_THROTTLE},    // relative throttle: THROTTLE reads this instead of 0111 when the car has it
@@ -270,6 +275,8 @@ void ObdSource::begin() {
     pinIdx_ = startPinIdx();
     macFails_ = 0;
     nodataRun_ = 0;
+    lastLambda_ = 0;
+    lastLambdaAt_ = 0;
     memset(pidMask_, 0, sizeof pidMask_);
     s_retarget = false;
     loadTarget();
@@ -338,13 +345,23 @@ bool ObdSource::readPid(int idx) {
             default:         return false;
         }
     }
-    switch (obdParsePid(resp_, d.pid, v)) {
+    const FuelSpec &fuel = kFuels[s_fuel];  // snapshot once: never mix AFR/density from two choices
+    switch (obdParsePid(resp_, d.pid, v, fuel.stoich)) {
         case OBD_OK:     noData_[idx] = 0; nodataRun_ = 0; bus::publish(d.ch, v);
-                         if (d.ch == CH_AFR) lastAfr_ = v;
+                         if (d.ch == CH_AFR) {
+                             lastLambda_ = v / fuel.stoich;
+                             lastLambdaAt_ = millis();
+                         }
                          if (d.ch == CH_MAF && pidMask_[0] && !obdHasPid(pidMask_, 0x5E)) {
-                             // car has no 015E: fuel rate from airflow x the live AFR (stoich until one arrives)
-                             float afr = lastAfr_ > 0 ? lastAfr_ : OBD_AFR_STOICH;
-                             float lph = obdMafFuelLph(v, afr);
+                             // Wait for a fresh lambda if the ECU supports it; never reuse stale AFR.
+                             // Without a lambda PID, assume stoich (an estimate, not a measured fuel rate).
+                             float lambda = 1.0f;
+                             if (obdHasPid(pidMask_, 0x34)) {
+                                 if (!lastLambdaAt_ || (uint32_t)(millis() - lastLambdaAt_) >= DATA_STALE_MS)
+                                     return true;
+                                 lambda = lastLambda_;
+                             }
+                             float lph = obdMafFuelLph(v, lambda * fuel.stoich, fuel.density, fuel.stoich);
                              if (!isnan(lph)) bus::publish(CH_FUEL_RATE, lph);
                          }
                          return true;
@@ -365,11 +382,9 @@ void ObdSource::forgetBond(const char *mac) {
 
 // Without a 0100 bitmask (some ECUs answer it oddly) fall back to the NO DATA counter.
 bool ObdSource::usable(int idx) const {
-    if (idx == P_FUEL_RATE && pidMask_[0] && !obdHasPid(pidMask_, 0x5E)) {
-        // no 015E on this car: the rate is derived from MAF x AFR (resolve() sends 0110 instead)
-        return obdItemWanted(s_want, PI_FUEL_RATE) && obdHasPid(pidMask_, 0x10);
-    }
-    if (!obdItemWanted(s_want, kPidItem[idx])) return false;   // no panel shows it
+    idx = resolve(idx);  // test support for the actual THROTTLE PID, not its fallback
+    uint32_t want = obdPollWantMask(s_want, pidMask_);
+    if (!obdItemWanted(want, kPidItem[idx])) return false;
     uint8_t pid = kPids[idx].pid;
     if (pid == 0) return true;                             // ATRV is the adapter itself
     if (pidMask_[0]) {
@@ -380,11 +395,8 @@ bool ObdSource::usable(int idx) const {
 }
 
 // P_TPS (THROTTLE) sends 0145 (relative, 0 % when closed) when the car lists it, else 0111.
-// P_FUEL_RATE asks the MAF PID instead when the car doesn't list 015E (readPid derives the rate).
 int ObdSource::resolve(int idx) const {
     if (idx == P_TPS && pidMask_[0] && obdHasPid(pidMask_, 0x45)) return P_TPS_REL;
-    if (idx == P_FUEL_RATE && pidMask_[0] && !obdHasPid(pidMask_, 0x5E) && obdHasPid(pidMask_, 0x10))
-        return P_MAF;
     return idx;
 }
 
@@ -515,6 +527,8 @@ void ObdSource::poll() {
             }
             memset(noData_, 0, sizeof noData_);
             nodataRun_ = 0;
+            lastLambda_ = 0;
+            lastLambdaAt_ = 0;
             s_supported = obdSupportedItems(pidMask_);
             Serial.printf("[obd] ECU found, PIDs 01-A0: %08lX %08lX %08lX %08lX %08lX\n",
                           (unsigned long)pidMask_[0], (unsigned long)pidMask_[1], (unsigned long)pidMask_[2],

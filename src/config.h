@@ -28,10 +28,10 @@
 #define VOLT_BAR_MAX       16.0f
 #define IAT_BAR_MIN         -10
 #define IAT_BAR_MAX          80
-#define AFR_RICH          13.8f    // AFR panel (HONDA K, OBD BT): below = rich (warning colour)
-#define AFR_LEAN          15.2f    //                       above = lean (blue)
-#define AFR_BAR_MIN       12.0f
-#define AFR_BAR_MAX       17.0f
+#define AFR_RICH_LAMBDA   0.94f    // AFR panel, as a fraction of the fuel's stoich: below = rich
+#define AFR_LEAN_LAMBDA   1.03f    //                                    above = lean (blue)
+#define AFR_BAR_MIN_LAMBDA 0.82f   // bar graph range, also fractions of stoich
+#define AFR_BAR_MAX_LAMBDA 1.15f
 
 // ---- Hybrid panels (SETUP -> PANELS: HYBRID, or AUTO when the car reports them) ----
 #define HYBRID_PANEL2_LABEL "HV BATT"   // state of charge, %
@@ -77,11 +77,11 @@
 #define OBD_BT_MAC         ""       // optional fixed MAC (or type obd=AA:BB:… on serial; the found one is saved)
 #define OBD_BT_PIN         "1234"   // tried first, then 1234 / 0000 / 6789 / 1111 (obdpin=… fixes one)
 #define OBD_CMD_TIMEOUT_MS 1500
-// OBD BT AFR panel: PID 0134 (O2 sensor 1 equivalence ratio, lambda) x this = air-fuel ratio.
-// 14.7 = petrol (what most apps use); gasohol E10 is closer to 14.1.
-#define OBD_AFR_STOICH     14.7f
+// OBD BT AFR panel: PID 0134 (O2 sensor 1 equivalence ratio, lambda) x the fuel's stoich = AFR.
+// Compile-time fallback only — the SETUP page FUEL choice (src/fuel.h) overrides it at runtime.
+#define OBD_AFR_STOICH     14.7f   // plain petrol
 // Fuel rate derived from airflow (MAF 0110 / live AFR, g/s -> L/h) when the car doesn't report
-// PID 015E (e.g. the Jazz GE8). Petrol ~745 g/L; Thai gasohol E10 ~750 g/L.
+// PID 015E (e.g. the Jazz GE8). Fallback density; the FUEL choice overrides it at runtime.
 #define OBD_FUEL_DENSITY_G_PER_L 745.0f
 
 // ---- Serial input (USB) ------------------------------------------------------

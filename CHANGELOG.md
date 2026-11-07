@@ -9,12 +9,18 @@ new features bump the middle number, fixes the last one.
 ### Added
 - **ENGINE LOAD panel** (`LOAD`, tap a right-hand panel): calculated engine load, OBD BT PID `0104`. Serial key `load=`.
 - **MAF panel** (`MAF`, G/S): mass air flow, OBD BT PID `0110` (the Jazz GE8 reports it). Serial key `maf=`.
-- **FUEL RATE from airflow** (this build): when the car doesn't report PID `015E` (the Jazz GE8 doesn't), the
-  rate is derived from MAF x the live AFR (stoich until one arrives), density `OBD_FUEL_DENSITY_G_PER_L` in
-  `config.h`. A reading outside 9.5–25 AFR (fuel cut, inactive sensor) publishes nothing and shows `--`.
-- **AFR over OBD BT**: PID `0134` (O2 sensor 1 equivalence ratio, lambda) x `OBD_AFR_STOICH` (14.7) feeds the
+- **FUEL RATE estimate from airflow** (this build): when the car doesn't report PID `015E`, estimate
+  L/h as MAF x 3600 / (AFR x density). Poll MAF and lambda even when their panels are hidden. When the ECU
+  supports lambda, wait for a fresh reading; otherwise assume lambda 1.0. A reading outside lambda
+  0.63–1.85 publishes nothing, so the estimate expires to `--` (not a claim of measured fuel cut).
+- **FUEL selector** (SETUP DASHBOARD -> FUEL, serial `fuel=g91|g95|e10|e20`, saved): G91 / G95 / E10 / E20.
+  **G91/G95 mean Thai gasohol 91/95 (E10), not ethanol-free petrol.** Both and E10 use approximate
+  stoich 14.1 / density 749 g/L; E20 uses 13.5 / 754 g/L. The selection applies at boot and runtime to
+  OBD lambda->AFR, AFR rich/lean thresholds and bar range, and the fuel-rate estimate. Default E20.
+  Numeric serial `fuel=65` still means fuel level. Values are estimates, not calibrated consumption.
+- **AFR over OBD BT**: PID `0134` (O2 sensor 1 equivalence ratio, lambda) x the fuel's stoich feeds the
   existing AFR panel. On a car with a wideband (A/F) sensor this is a measurement; an inactive sensor (engine
-  off, warming up) or a fuel cut reads about lambda 2.0 (29.4).
+  off, warming up) or a fuel cut reads about lambda 2.0.
 
 ### Changed
 - **OBD BT polls only what the three right-hand panels show.** RPM, speed and the hybrid values are always polled;
@@ -26,11 +32,14 @@ new features bump the middle number, fixes the last one.
 ### Debug / this build only (branch `jazzge`, not for upstream)
 - THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
 - The FUEL RATE panel shows **km/L** (speed / L-h, live; 0.0 while stopped) instead of L/h — the bus and
-  the serial `fuelrate=` value stay L/h.
+  the serial `fuelrate=` value stay L/h. Zero or stale fuel rate / stale speed shows `--`.
+- Removed the six PID-labelled throttle/pedal debug panels; unversioned saved debug IDs fall back
+  to the slot defaults rather than being reinterpreted as the new MAF item.
 - Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
 - THROTTLE panel shows one decimal (4.7 %, not 5 %).
 - **SETUP DASHBOARD page** (SETTINGS -> SETUP, where the GEAR button was): GEAR AUTO / OFF moved in, plus a new
-  **RPM STEP 10 / 25 / 50** (big RPM number rounding, default 10, upstream 50; saved; serial `rpmstep=`). BACK returns.
+  **RPM STEP 10 / 25 / 50** (big RPM number rounding, default 10, upstream 50; saved; serial `rpmstep=`) and
+  **FUEL G91 / G95 / E10 / E20**. BACK returns.
 - Automatic-gearbox gear tracking (`GEAR_HOLD 1`): when the converter slips or the engine idles while rolling
   (lifting off at low speed) the last gear is held instead of showing N, pulling away from a stop shows 1st, the
   held gear steps down / up with speed, an idle-coasting "match" (800 rpm at 25 km/h looks like 4th) is ignored,

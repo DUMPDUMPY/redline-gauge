@@ -23,8 +23,9 @@ inline int obdHexByte(const char *p) {
 }
 
 // Standard Mode 01 PIDs used by the gauge. 9A (hybrid battery V/A) has its own parser.
-// Several ECUs may answer; the first "41<pid>" wins.
-inline ObdResult obdParsePid(const char *resp, uint8_t pid, float &out) {
+// Several ECUs may answer; the first "41<pid>" wins. `stoich` converts the lambda PID (0134)
+// to an AFR on the fuel's scale (fuel.h); defaults to plain petrol.
+inline ObdResult obdParsePid(const char *resp, uint8_t pid, float &out, float stoich = OBD_AFR_STOICH) {
     char tag[5];
     snprintf(tag, sizeof tag, "41%02X", pid);
     const char *p = strstr(resp, tag);          // data from any ECU wins over another's NO DATA
@@ -66,7 +67,7 @@ inline ObdResult obdParsePid(const char *resp, uint8_t pid, float &out) {
         case 0x34: {                                    // 41 34 A B C D: lambda = (A*256+B)/32768 -> AFR
             int B = obdHexByte(p + 6);                  // (C D = sensor current, not used)
             if (B < 0) return OBD_BAD;
-            out = (A * 256 + B) / 32768.0f * OBD_AFR_STOICH;
+            out = (A * 256 + B) / 32768.0f * stoich;
             return OBD_OK;
         }
         case 0x5E: {
@@ -88,12 +89,16 @@ inline ObdResult obdParseVolt(const char *resp, float &out) {
     return OBD_OK;
 }
 
-// Instant fuel rate from airflow: air g/s / AFR = fuel g/s -> L/h at OBD_FUEL_DENSITY_G_PER_L.
-// An AFR outside a sane band (inactive/warming wideband or fuel cut reads lambda ~2.0 = AFR 29.4)
-// gives NAN — the value then goes stale and the panel shows "--" instead of a wrong number.
-inline float obdMafFuelLph(float maf_gs, float afr) {
-    if (!(maf_gs > 0.0f) || afr < 9.5f || afr > 25.0f) return NAN;
-    return maf_gs * 3600.0f / (afr * OBD_FUEL_DENSITY_G_PER_L);
+// Instant fuel rate from airflow: air g/s / AFR = fuel g/s -> L/h at the fuel's density (fuel.h).
+// Guard in lambda units, not fixed AFR, so the same limits apply on every fuel.
+// A saturated/invalid reading is not proof of fuel cut: show no estimate, not invented zero fuel.
+inline float obdMafFuelLph(float maf_gs, float afr, float density = OBD_FUEL_DENSITY_G_PER_L,
+                          float stoich = OBD_AFR_STOICH) {
+    if (!isfinite(maf_gs) || maf_gs < 0 || !isfinite(afr) ||
+        !isfinite(density) || density <= 0 || !isfinite(stoich) || stoich <= 0) return NAN;
+    float lambda = afr / stoich;
+    if (lambda < 0.63f || lambda > 1.85f) return NAN;
+    return maf_gs * 3600.0f / (afr * density);
 }
 
 // ---- adapter selection (Bluetooth scan) ---------------------------------------------
@@ -190,7 +195,7 @@ inline uint32_t obdSupportedItems(const uint32_t pm[5]) {
     };
     uint32_t m = 1u << PI_VOLTAGE;
     for (auto &e : map) if (obdHasPid(pm, e.pid)) m |= 1u << e.item;
-    // FUEL RATE can also be derived from MAF x AFR when the car doesn't list 015E
+    // FUEL RATE can also be estimated from MAF / AFR when the car doesn't list 015E
     if (!obdHasPid(pm, 0x5E) && obdHasPid(pm, 0x10)) m |= 1u << PI_FUEL_RATE;
     return m;
 }
@@ -200,6 +205,16 @@ inline uint32_t obdWantMask(const uint8_t items[3]) {
     uint32_t m = 0;
     for (int i = 0; i < 3; i++) if (items[i] < PI_COUNT) m |= 1u << items[i];
     return m;
+}
+
+// A km/L estimate still needs MAF and (when supported) lambda even with their panels hidden.
+// Native 015E takes precedence. Unknown PID support keeps the ordinary probing behaviour.
+inline uint32_t obdPollWantMask(uint32_t shown, const uint32_t pm[5]) {
+    if (pm[0] && (shown & (1u << PI_FUEL_RATE)) && !obdHasPid(pm, 0x5E) && obdHasPid(pm, 0x10)) {
+        shown |= 1u << PI_MAF;
+        if (obdHasPid(pm, 0x34)) shown |= 1u << PI_AFR;
+    }
+    return shown;
 }
 
 // Is a poll slot worth a request? item >= PI_COUNT (RPM, speed, hybrid ...) is always polled.

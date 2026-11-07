@@ -41,6 +41,8 @@ public:
     static void setShownItems(const uint8_t items[3]);
     // Panel items this car can fill (bit n = PanelItem n), known once the ECU search is done; 0 before that.
     static uint32_t supportedItems();
+    // What's in the tank (FuelType): the lambda->AFR conversion and the derived fuel rate follow it.
+    static void setFuel(uint8_t fuel);
 
     static constexpr uint8_t kMaxPids = 24;   // size of the per-PID tables (static_assert in the .cpp)
 
@@ -61,7 +63,9 @@ private:
     uint8_t  macFails_ = 0;
     uint8_t  nodataRun_ = 0;         // consecutive NO DATA replies
     uint32_t pidMask_[5] = {};       // supported PIDs 01-A0 (0100, 0120 … 0180), [0] = 0: unknown
-    float    lastAfr_ = 0;           // last AFR reply (0 = none yet): feeds the MAF-derived fuel rate
+    float    lastLambda_ = 0;        // cache lambda, not fuel-specific AFR, across fuel changes
+    uint32_t lastLambdaAt_ = 0;
+    static volatile uint8_t s_fuel;  // one coherent fuel choice shared by UI/data cores
 
     void retryIn(uint32_t ms, State then, const char *msg);
     bool elm(const char *cmd, uint32_t timeoutMs);

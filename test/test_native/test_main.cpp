@@ -230,9 +230,14 @@ static void test_obd_parse() {
     TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("41100320", 0x10, v));       // MAF: (3*256+32)/100 = 8.00 g/s
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, v);
     TEST_ASSERT_EQUAL(OBD_BAD, obdParsePid("411003", 0x10, v));        // second byte missing
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.63f, obdMafFuelLph(8.0f, 14.7f));   // 8*3600/(14.7*745)
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f * 3600.0f / (14.7f * OBD_FUEL_DENSITY_G_PER_L),
+                             obdMafFuelLph(8.0f, 14.7f));                // density from config.h
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f * 3600.0f / (kFuels[FUEL_E20].stoich * kFuels[FUEL_E20].density),
+                             obdMafFuelLph(8.0f, kFuels[FUEL_E20].stoich, kFuels[FUEL_E20].density));
+    TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("413480008000", 0x34, v, kFuels[FUEL_E20].stoich));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, kFuels[FUEL_E20].stoich, v);        // lambda 1.0 on E20's scale
     TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8.0f, 29.4f)));              // fuel cut / inactive sensor: no value
-    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(0.0f, 14.7f)));
+    TEST_ASSERT_EQUAL_FLOAT(0, obdMafFuelLph(0.0f, 14.7f));
     TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("415E0100", 0x5E, v));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.8f, v);
     TEST_ASSERT_EQUAL(OBD_NODATA, obdParsePid("NODATA", 0x0C, v));
@@ -776,8 +781,8 @@ static void test_honda_o2_afr() {
     TEST_ASSERT_TRUE(hkDecodeO2(lean, sizeof lean, raw));
     TEST_ASSERT_EQUAL_HEX8(0x12, raw);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.76f, hkO2Volts(0xC3));
-    TEST_ASSERT_TRUE(hkAfrFromO2(hkO2Volts(0xC3)) < AFR_RICH);       // rich side
-    TEST_ASSERT_TRUE(hkAfrFromO2(hkO2Volts(0x12)) > AFR_LEAN);       // lean side
+    TEST_ASSERT_TRUE(hkAfrFromO2(hkO2Volts(0xC3)) < 14.7f * AFR_RICH_LAMBDA);   // rich side (petrol scale)
+    TEST_ASSERT_TRUE(hkAfrFromO2(hkO2Volts(0x12)) > 14.7f * AFR_LEAN_LAMBDA);   // lean side
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 14.7f, hkAfrFromO2(0.45f));      // switch point = stoich
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.8f, hkAfrFromO2(-1));         // clamped
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.6f, hkAfrFromO2(5));
@@ -795,7 +800,8 @@ static void test_afr_panel() {
     GaugeView v;
     m.reset(1000);
     bus::clear();
-    bus::publish(CH_AFR, 13.0f);
+    m.setFuel(FUEL_E20);                     // this car: rich/lean scale with the fuel's stoich
+    bus::publish(CH_AFR, 13.5f * 0.92f);     // lambda 0.92: rich on any fuel
     bus::publish(CH_THROTTLE, 42);
     GaugeSnapshot s;
     bus::snapshot(s);
@@ -1263,6 +1269,11 @@ static void test_settings_taps() {
     TEST_ASSERT_EQUAL_UINT8(50, s.rpmStep);
     TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(44, 135, s));   // RPM STEP 10
     TEST_ASSERT_EQUAL_UINT8(10, s.rpmStep);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(196, 219, s));  // FUEL E10
+    TEST_ASSERT_EQUAL_UINT8(FUEL_E10, s.fuel);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(196, 219, s));     // already E10: no-op
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(272, 219, s));  // FUEL E20
+    TEST_ASSERT_EQUAL_UINT8(FUEL_E20, s.fuel);
     TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(280, 14, s)); // BACK (same spot as DONE)
     TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(280, 14, s));     // main page again: DONE closes
     TEST_ASSERT_EQUAL_UINT8(2, s.klineUart);
@@ -1300,6 +1311,125 @@ static void test_rpm_step() {
     m.setRpmStep(0);                                                   // nonsense: the build default
     settleAt(4237);
     TEST_ASSERT_EQUAL_INT((int)(4237 / (float)RPM_DISPLAY_STEP + 0.5f) * RPM_DISPLAY_STEP, v.rpmText);
+}
+
+static void test_fuel_gasohol_specs_and_keys() {
+    Settings s;
+    TEST_ASSERT_EQUAL_UINT8(FUEL_E20, s.fuel);
+    for (int i = FUEL_G91; i <= FUEL_E10; i++) {
+        TEST_ASSERT_EQUAL_FLOAT(14.1f, kFuels[i].stoich);
+        TEST_ASSERT_EQUAL_FLOAT(749.0f, kFuels[i].density);
+    }
+    TEST_ASSERT_EQUAL_UINT8(FUEL_G91, fuelTypeFromKey("G91"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_G95, fuelTypeFromKey("g95"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_E10, fuelTypeFromKey("E10"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_E20, fuelTypeFromKey("e20 \r\n"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_COUNT, fuelTypeFromKey("e20extra"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_COUNT, fuelTypeFromKey("65"));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_COUNT, fuelTypeFromKey(""));
+    TEST_ASSERT_EQUAL_UINT8(FUEL_COUNT, fuelTypeFromKey(nullptr));
+    bus::clear();
+    TEST_ASSERT_EQUAL_INT(1, SerialSource::feed("fuel=65", true));
+    GaugeSnapshot snap;
+    bus::snapshot(snap);
+    TEST_ASSERT_EQUAL_FLOAT(65, snap.value[CH_FUEL_LEVEL]);
+}
+
+static void test_fuel_math_all_blends() {
+    for (const FuelSpec &fuel : kFuels) {
+        float afr;
+        TEST_ASSERT_EQUAL(OBD_OK, obdParsePid("413480008000", 0x34, afr, fuel.stoich));
+        TEST_ASSERT_EQUAL_FLOAT(fuel.stoich, afr);
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, 8.0f * 3600 / (fuel.stoich * fuel.density),
+                                obdMafFuelLph(8, afr, fuel.density, fuel.stoich));
+        TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8, 2.0f * fuel.stoich, fuel.density, fuel.stoich)));
+        TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8, 0.5f * fuel.stoich, fuel.density, fuel.stoich)));
+        TEST_ASSERT_FALSE(isnan(obdMafFuelLph(8, 0.7f * fuel.stoich, fuel.density, fuel.stoich)));
+    }
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(-1, 14.7f)));
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(INFINITY, 14.7f)));
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8, NAN)));
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8, 14.7f, 0)));
+    TEST_ASSERT_TRUE(isnan(obdMafFuelLph(8, 14.7f, 745, 0)));
+}
+
+static void test_fuel_poll_dependencies() {
+    uint32_t pm[5];
+    pidPages(pm, {0x0C, 0x0D, 0x10, 0x34});
+    uint32_t shown = (1u << PI_COOLANT) | (1u << PI_VOLTAGE) | (1u << PI_FUEL_RATE);
+    uint32_t needed = shown | (1u << PI_MAF) | (1u << PI_AFR);
+    TEST_ASSERT_EQUAL_HEX32(needed, obdPollWantMask(shown, pm));  // AFR/MAF panels are hidden
+    TEST_ASSERT_EQUAL_HEX32(1u << PI_MAF, obdPollWantMask(1u << PI_MAF, pm)); // MAF alone costs no AFR request
+    pidPages(pm, {0x0C, 0x0D, 0x10, 0x34, 0x5E});
+    TEST_ASSERT_EQUAL_HEX32(shown, obdPollWantMask(shown, pm));   // native fuel rate wins
+    pidPages(pm, {0x0C, 0x0D, 0x10});
+    TEST_ASSERT_EQUAL_HEX32(shown | (1u << PI_MAF), obdPollWantMask(shown, pm)); // no lambda: stoich estimate
+    uint32_t unknown[5] = {};
+    TEST_ASSERT_EQUAL_HEX32(shown, obdPollWantMask(shown, unknown));
+}
+
+static void test_panel_settings_migrate_removed_debug_ids() {
+    Settings old;
+    const uint8_t debug[3] = { 13, 15, 18 };
+    old.restorePanelItems(debug, 0);
+    TEST_ASSERT_EQUAL_UINT8(PI_COOLANT, old.panelItem[0]);
+    TEST_ASSERT_EQUAL_UINT8(PI_VOLTAGE, old.panelItem[1]);
+    TEST_ASSERT_EQUAL_UINT8(PI_INTAKE, old.panelItem[2]);
+    const uint8_t normal[3] = { PI_AFR, PI_THROTTLE, PI_LOAD };
+    old.restorePanelItems(normal, 0);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(normal, old.panelItem, 3);
+    Settings current;
+    const uint8_t maf[3] = { PI_MAF, PI_FUEL_RATE, 255 };
+    current.restorePanelItems(maf, Settings::kPanelSchema);
+    TEST_ASSERT_EQUAL_UINT8(PI_MAF, current.panelItem[0]);
+    TEST_ASSERT_EQUAL_UINT8(PI_FUEL_RATE, current.panelItem[1]);
+    TEST_ASSERT_EQUAL_UINT8(PI_INTAKE, current.panelItem[2]);
+}
+
+static void test_model_economy_edge_cases() {
+    GaugeModel m;
+    GaugeView v = {};
+    GaugeSnapshot s = {};
+    uint32_t now = 10000;
+    m.reset(now);
+    s.stamp[CH_SPEED] = s.stamp[CH_FUEL_RATE] = now;
+    s.value[CH_FUEL_RATE] = 0.7f;
+    m.update(s, now, "OBD BT", v);
+    TEST_ASSERT_TRUE(v.kmlValid);
+    TEST_ASSERT_EQUAL_FLOAT(0, v.kml);  // idling: uses fuel without covering distance
+    s.value[CH_SPEED] = 100;
+    s.value[CH_FUEL_RATE] = 5;
+    m.update(s, now, "OBD BT", v);
+    TEST_ASSERT_TRUE(v.kmlValid);
+    TEST_ASSERT_EQUAL_FLOAT(20, v.kml);
+    s.value[CH_FUEL_RATE] = 0;
+    m.update(s, now, "OBD BT", v);
+    TEST_ASSERT_FALSE(v.kmlValid);  // no division by zero / fake infinity
+    s.value[CH_FUEL_RATE] = 5;
+    s.stamp[CH_SPEED] = now - DATA_STALE_MS;
+    m.update(s, now, "OBD BT", v);
+    TEST_ASSERT_FALSE(v.kmlValid);
+    s.stamp[CH_SPEED] = now;
+    s.stamp[CH_FUEL_RATE] = now - DATA_STALE_MS;
+    m.update(s, now, "OBD BT", v);
+    TEST_ASSERT_FALSE(v.kmlValid);
+}
+
+static void test_model_fuel_afr_levels() {
+    for (uint8_t i = 0; i < FUEL_COUNT; i++) {
+        for (float lambda : { 0.90f, 1.0f, 1.10f }) {
+            GaugeModel m;
+            GaugeView v = {};
+            GaugeSnapshot s = {};
+            m.setFuel(i);
+            m.reset(10000);
+            s.stamp[CH_AFR] = 10000;
+            s.value[CH_AFR] = lambda * kFuels[i].stoich;
+            m.update(s, 10000, "OBD BT", v);
+            TEST_ASSERT_TRUE(v.afrValid);
+            TEST_ASSERT_EQUAL(lambda < 0.94f ? LV_WARN : lambda > 1.03f ? LV_COLD : LV_NORMAL, v.afrLvl);
+        }
+    }
 }
 
 static void test_settings_limits() {
@@ -1370,6 +1500,12 @@ int main(int, char **) {
     RUN_TEST(test_splash_renders_every_theme);
     RUN_TEST(test_settings_taps);
     RUN_TEST(test_rpm_step);
+    RUN_TEST(test_fuel_gasohol_specs_and_keys);
+    RUN_TEST(test_fuel_math_all_blends);
+    RUN_TEST(test_fuel_poll_dependencies);
+    RUN_TEST(test_panel_settings_migrate_removed_debug_ids);
+    RUN_TEST(test_model_economy_edge_cases);
+    RUN_TEST(test_model_fuel_afr_levels);
     RUN_TEST(test_settings_limits);
     return UNITY_END();
 }

@@ -3,6 +3,7 @@
 // stored in NVS by main.cpp. Defaults come from config.h.
 #include <stdint.h>
 #include "config.h"
+#include "fuel.h"
 
 enum SourceId : uint8_t { SRC_SIM_AUTO, SRC_SIM_TOUCH, SRC_SERIAL, SRC_OBD, SRC_CUSTOM, SRC_HONDA, SRC_COUNT };
 
@@ -29,6 +30,7 @@ struct Settings {
     uint8_t  gearMode   = GEARMODE_AUTO;
     uint8_t  panelItem[3] = { PI_COOLANT, PI_VOLTAGE, PI_INTAKE };
     uint8_t  rpmStep    = RPM_DISPLAY_STEP;   // the big RPM number is rounded to this: 10, 25 or 50 (SETUP page)
+    uint8_t  fuel       = FUEL_E20;           // what's in the tank (SETUP DASHBOARD): stoich/density for AFR + fuel rate
     uint8_t  klineUart  = 2;             // HONDA K pins: 2 = UART2 (22/27), 0 = UART0 (3/1)
     // Panel colour inversion. The build picks the default (esp32dev = inverted panel), but
     // CYD batches differ, so SETUP -> COLORS flips it at runtime and it is saved.
@@ -37,6 +39,15 @@ struct Settings {
 #else
     bool     invert     = false;
 #endif
+
+    // Older jazzge builds used IDs 13..18 for the removed PID debug panels.
+    // MAF now occupies ID 13, so unversioned NVS must not reinterpret an old debug choice.
+    static const uint8_t kPanelSchema = 1;
+    void restorePanelItems(const uint8_t saved[3], uint8_t schema) {
+        for (int i = 0; i < 3; i++)
+            if (saved[i] < PI_COUNT && (schema >= kPanelSchema || saved[i] <= PI_LOAD))
+                panelItem[i] = saved[i];
+    }
 
     static const uint16_t kShiftMin = 3000, kShiftMax = RPM_MAX, kShiftStep = 250;
     static const uint8_t  kBrightMin = 20, kBrightStep = 20;
