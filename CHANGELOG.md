@@ -20,8 +20,6 @@ new features bump the middle number, fixes the last one.
   not just those that happen to have fresh data right now.
 
 ### Debug / this build only (branch `jazzge`, not for upstream)
-- Six extra panel choices, one per throttle-ish PID, labelled with the PID: `THR 0111`, `THR 0145`, `THR 0147`,
-  `PED 0149`, `PED 014A`, `ACT 014C`. Tap through them to compare which one follows the pedal best.
 - THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
 - Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
 - THROTTLE panel shows one decimal (4.7 %, not 5 %).

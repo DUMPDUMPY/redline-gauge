@@ -171,7 +171,6 @@ inline uint32_t obdSupportedItems(const uint32_t pm[5]) {
         { PI_FUEL_LEVEL, 0x2F }, { PI_FUEL_RATE, 0x5E }, { PI_STFT, 0x06 }, { PI_LTFT, 0x07 },
         { PI_MAP, 0x0B }, { PI_IGNITION, 0x0E }, { PI_O2_MV, 0x14 }, { PI_LOAD, 0x04 },
         { PI_THROTTLE, 0x45 },                          // (this build prefers the relative throttle PID)
-        { PI_D11, 0x11 }, { PI_D45, 0x45 }, { PI_D47, 0x47 }, { PI_D49, 0x49 }, { PI_D4A, 0x4A }, { PI_D4C, 0x4C },
     };
     uint32_t m = 1u << PI_VOLTAGE;
     for (auto &e : map) if (obdHasPid(pm, e.pid)) m |= 1u << e.item;

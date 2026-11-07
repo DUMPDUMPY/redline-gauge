@@ -171,10 +171,6 @@ void GaugeModel::update(const GaugeSnapshot &s, uint32_t now, const char *modeNa
     v.load = (int)lroundf(s.value[CH_LOAD]);
     if (v.load < 0) v.load = 0;
     if (v.load > 100) v.load = 100;
-    for (int k = 0; k < 6; k++) {                    // DEBUG throttle PIDs, shown as they come
-        v.dbgValid[k] = fresh(s, (Channel)(CH_D11 + k), now);
-        v.dbg[k] = s.value[CH_D11 + k];
-    }
 
     v.socValid = fresh(s, CH_HV_SOC, now);
     v.soc = (int)lroundf(s.value[CH_HV_SOC]);

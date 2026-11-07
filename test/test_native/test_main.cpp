@@ -269,16 +269,10 @@ static void test_model_extra_telemetry_and_staleness() {
     s.value[CH_O2_MV] = 450; s.stamp[CH_O2_MV] = g_host_ms;
     s.value[CH_LOAD] = 37.4f; s.stamp[CH_LOAD] = g_host_ms;
     s.value[CH_THROTTLE] = 4.73f; s.stamp[CH_THROTTLE] = g_host_ms;
-    s.value[CH_D49] = 19.2f; s.stamp[CH_D49] = g_host_ms;               // DEBUG throttle panels
-    s.value[CH_D45] = 4.7f; s.stamp[CH_D45] = g_host_ms;
     m.update(s, g_host_ms, "TEST", v);
     TEST_ASSERT_TRUE(v.loadValid);
     TEST_ASSERT_EQUAL_INT(37, v.load);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.73f, v.tpsF);                    // throttle keeps its decimals
-    TEST_ASSERT_TRUE(v.dbgValid[PI_D49 - PI_D11]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 19.2f, v.dbg[PI_D49 - PI_D11]);
-    TEST_ASSERT_TRUE(v.dbgValid[PI_D45 - PI_D11]);
-    TEST_ASSERT_FALSE(v.dbgValid[PI_D47 - PI_D11]);                      // never published
     TEST_ASSERT_TRUE(v.fuelLevelValid);
     TEST_ASSERT_EQUAL_INT(65, v.fuelLevel);
     TEST_ASSERT_TRUE(v.fuelRateValid);
@@ -852,8 +846,7 @@ static void test_obd_polls_only_shown_items() {
     TEST_ASSERT_TRUE(obdHasPid(pm, 0x34));
     TEST_ASSERT_FALSE(obdHasPid(pm, 0x2F));
     const uint32_t jazz = (1u << PI_COOLANT) | (1u << PI_VOLTAGE) | (1u << PI_INTAKE) | (1u << PI_AFR) |
-                          (1u << PI_THROTTLE) | (1u << PI_STFT) | (1u << PI_MAP) | (1u << PI_IGNITION) | (1u << PI_LOAD) |
-                          (1u << PI_D11) | (1u << PI_D45) | (1u << PI_D47) | (1u << PI_D49) | (1u << PI_D4A) | (1u << PI_D4C);
+                          (1u << PI_THROTTLE) | (1u << PI_STFT) | (1u << PI_MAP) | (1u << PI_IGNITION) | (1u << PI_LOAD);
     TEST_ASSERT_EQUAL_HEX32(jazz, obdSupportedItems(pm));                   // no fuel level / rate, LTFT or O2 mV
     uint32_t none[5] = {};
     TEST_ASSERT_EQUAL_HEX32((1u << PI_COUNT) - 1, obdSupportedItems(none));  // no bitmask: offer everything
@@ -888,9 +881,6 @@ static void test_obd_polls_only_shown_items() {
     TEST_ASSERT_EQUAL_UINT8(PI_STFT, gauge_ui::nextPanelItem(2, v, jazz));   // fuel level / rate: not on this car
     const uint8_t items3[3] = { PI_COOLANT, PI_VOLTAGE, PI_LOAD };
     gauge_ui::setPanelItems(items3);
-    TEST_ASSERT_EQUAL_UINT8(PI_D11, gauge_ui::nextPanelItem(2, v, jazz));    // the debug panels follow LOAD
-    const uint8_t items4[3] = { PI_COOLANT, PI_VOLTAGE, PI_D4C };
-    gauge_ui::setPanelItems(items4);
     TEST_ASSERT_EQUAL_UINT8(PI_INTAKE, gauge_ui::nextPanelItem(2, v, jazz)); // wraps past the shown COOLANT / VOLTAGE
     gauge_ui::setPanelItems(shown);
 }

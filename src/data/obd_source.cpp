@@ -213,7 +213,7 @@ bool ObdSource::scan(char *macOut) {
 enum {
     P_RPM, P_SPEED, P_COOLANT, P_IAT, P_VOLT, P_HV_SOC, P_HV,
     P_TPS, P_FUEL_LEVEL, P_FUEL_RATE, P_STFT, P_LTFT, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD,
-    P_TPS_REL, P_D11, P_D45, P_D47, P_D49, P_D4A, P_D4C, P_COUNT
+    P_TPS_REL, P_COUNT
 };
 struct PidDef { const char *cmd; uint8_t pid; Channel ch; };
 static const PidDef kPids[] = {
@@ -235,13 +235,6 @@ static const PidDef kPids[] = {
     {"0134", 0x34, CH_AFR},         // O2 sensor 1 equivalence ratio (lambda) x 14.7 -> AFR
     {"0104", 0x04, CH_LOAD},        // calculated engine load
     {"0145", 0x45, CH_THROTTLE},    // relative throttle: THROTTLE reads this instead of 0111 when the car has it
-    // DEBUG: every throttle-ish PID on its own panel (see PI_D11 ... PI_D4C)
-    {"0111", 0x11, CH_D11},
-    {"0145", 0x45, CH_D45},
-    {"0147", 0x47, CH_D47},
-    {"0149", 0x49, CH_D49},
-    {"014A", 0x4A, CH_D4A},
-    {"014C", 0x4C, CH_D4C},
 };
 static_assert(sizeof kPids / sizeof kPids[0] == P_COUNT, "kPids / enum mismatch");
 static_assert(P_COUNT <= ObdSource::kMaxPids, "ObdSource::noData_ is too small for the PID list");
@@ -249,15 +242,14 @@ static_assert(P_COUNT <= ObdSource::kMaxPids, "ObdSource::noData_ is too small f
 static const uint8_t kPidItem[P_COUNT] = {
     PI_COUNT, PI_COUNT, PI_COOLANT, PI_INTAKE, PI_VOLTAGE, PI_COUNT, PI_COUNT,
     PI_THROTTLE, PI_FUEL_LEVEL, PI_FUEL_RATE, PI_STFT, PI_LTFT, PI_MAP, PI_IGNITION, PI_O2_MV, PI_AFR, PI_LOAD,
-    PI_THROTTLE, PI_D11, PI_D45, PI_D47, PI_D49, PI_D4A, PI_D4C,
+    PI_THROTTLE,
 };
 // RPM is polled on every other request. The requests in between walk through this list; entries the car
 // doesn't support or that no right-hand panel shows (see usable()) are skipped, so what IS shown gets the
 // slots. Speed and throttle come twice per round.
 static const uint8_t kOthers[] = {
-    P_SPEED, P_D11, P_D45, P_D47, P_D49, P_D4A, P_D4C, P_TPS, P_COOLANT, P_IAT, P_VOLT, P_FUEL_LEVEL, P_FUEL_RATE,
-    P_SPEED, P_D11, P_D45, P_D47, P_D49, P_D4A, P_D4C, P_TPS, P_STFT, P_LTFT, P_MAP, P_IGNITION,
-    P_SPEED, P_D11, P_D45, P_D47, P_D49, P_D4A, P_D4C, P_TPS, P_O2, P_AFR, P_LOAD, P_HV, P_HV_SOC,
+    P_SPEED, P_TPS, P_COOLANT, P_IAT, P_VOLT, P_FUEL_LEVEL, P_FUEL_RATE, P_STFT, P_LTFT,
+    P_SPEED, P_TPS, P_MAP, P_IGNITION, P_O2, P_AFR, P_LOAD, P_HV, P_HV_SOC,
 };
 
 void ObdSource::retryIn(uint32_t ms, State then, const char *msg) {

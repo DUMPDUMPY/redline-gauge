@@ -430,22 +430,12 @@ static bool itemValid(uint8_t item, const GaugeView &v) {
         case PI_IGNITION:   return v.ignitionValid;
         case PI_O2_MV:      return v.o2MvValid;
         case PI_LOAD:       return v.loadValid;
-        default:            return item >= PI_D11 && item < PI_COUNT && v.dbgValid[item - PI_D11];
+        default:            return false;   // PI_COUNT: not a panel value
     }
 }
 
-// DEBUG panels: the label carries the PID so a drive can compare them one by one
-static const char *const kDbgLabel[6] = { "THR 0111", "THR 0145", "THR 0147", "PED 0149", "PED 014A", "ACT 014C" };
-
 static void drawItem(int i, uint8_t item, const GaugeView &v) {
     char buf[12];
-    if (item >= PI_D11 && item < PI_COUNT) {
-        int k = item - PI_D11;
-        float x = v.dbg[k];
-        snprintf(buf, sizeof buf, x < 99.95f ? "%.1f" : "%.0f", x);
-        drawPanel(i, kDbgLabel[k], v.dbgValid[k], buf, "%", s_theme->accentBright, x / 100.0f);
-        return;
-    }
     switch (item) {
     case PI_VOLTAGE:
         snprintf(buf, sizeof buf, "%.1f", v.volt);
