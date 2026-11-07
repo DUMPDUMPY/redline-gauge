@@ -32,6 +32,19 @@ new features bump the middle number, fixes the last one.
   held gear steps down / up with speed, an idle-coasting "match" (800 rpm at 25 km/h looks like 4th) is ignored,
   and a new gear is shown once it has been the estimate for 150 ms. N only when stopped.
 
+## [1.9.2] - 2026-11-04
+
+### Added
+- **ST7789 build at 40 MHz SPI** (`redline-v1.9.2-cyd-st7789-spi40-*.bin`) for a 2USB panel that
+  speckles or shifts at 80 MHz. Same panel as `cyd-st7789`, colours inverted by default (COLORS flips it).
+
+## [1.9.1] - 2026-11-04
+
+### Added
+- **ST7789 panel build** for the "2USB" CYD (the variant with both micro-USB and USB-C, whose screen is
+  ST7789 instead of ILI9341): `redline-v1.9.1-cyd-st7789-*.bin`. Colours are inverted by default; flip
+  COLORS on the SETUP page if they look wrong. Single-USB boards keep the usual `invert` / `noinvert` images.
+
 ## [1.9.0] - 2026-11-02
 
 ### Added
