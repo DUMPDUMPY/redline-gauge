@@ -39,6 +39,10 @@ static const char *hintFor(const char *reason) {
     if (!strcmp(reason, "BT LOST"))    return "Bluetooth dropped: adapter unplugged?";
     if (!strcmp(reason, "ELM ERROR"))  return "The adapter doesn't answer like an ELM327";
     if (!strcmp(reason, "ECU LOST"))   return "The car stopped answering: ignition off?";
+    if (!strcmp(reason, "RE-CONNECT")) return "Stale link: rebuilding the Bluetooth link";
+    if (!strcmp(reason, "BT RESTART")) return "Rebuilding didn't help: restarting Bluetooth";
+    if (!strcmp(reason, "COOLDOWN"))   return "Recovery paused, trying again in 30 s";
+    if (!strcmp(reason, "RECONNECT"))  return "obd=reconnect: restarting cleanly";
     return "Adapter OK, car silent: ignition ON?";
 }
 
@@ -61,6 +65,11 @@ bool ObdSource::linkStatus(LinkStatus &out) {
     char v[14];
     if (s_pids) snprintf(v, sizeof v, "%u", (unsigned)s_pids); else snprintf(v, sizeof v, "--");
     row("PIDS", v, false);
+    if (sppCycles_ || btCycles_ || stuckSearch_ || stuckInit_) {
+        char rb[20];
+        snprintf(rb, sizeof rb, "spp %u bt %u", sppCycles_, btCycles_);
+        row("RECOVERY", rb, false);         // issue #1: where the escalation ladder is
+    }
     return true;
 }
 
@@ -92,6 +101,7 @@ void ObdSource::setFuel(uint8_t fuel) {
 }
 static volatile bool s_retarget = false;    // set by serial commands (core 1)
 static volatile bool s_forgetBond = false;  // obd=scan: also drop the pairing key
+static volatile bool s_reconnect = false;   // obd=reconnect: clean stack restart, same adapter
 static volatile uint32_t s_passkey = 1234;  // SSP passkey answer = the PIN being tried
 
 static bool validMac(const char *m) { return obdValidMac(m); }
@@ -99,6 +109,11 @@ static bool validMac(const char *m) { return obdValidMac(m); }
 static int startPinIdx() { return 0; }   // kPins[0] is OBD_BT_PIN
 
 bool ObdSource::command(const char *line) {
+    if (!strncasecmp(line, "reconnect", 9)) {   // clean restart, keeps the saved adapter/PIN
+        s_reconnect = true;
+        Serial.println("[obd] clean reconnect requested");
+        return true;
+    }
     Preferences p;
     if (!p.begin("obd", false)) return false;
     bool ok = true;
@@ -267,6 +282,37 @@ void ObdSource::retryIn(uint32_t ms, State then, const char *msg) {
     state_ = S_WAIT;
 }
 
+// Issue #1: a stage that keeps failing while the Bluetooth link claims to be up moves up
+// one recovery rung: rebuild the SPP link (also re-runs ELM init) -> restart the whole
+// stack -> a long cooldown, then the ladder starts over. Counters reset on live data.
+void ObdSource::escalate() {
+    switch (obdEscalate(stuckSearch_, stuckInit_, sppCycles_, btCycles_)) {
+    case OBD_REC_COOL:
+        btCycles_ = 0;                          // after the pause the ladder starts over
+        stuckSearch_ = stuckInit_ = 0;
+        retryIn(30000, S_BT_START, "COOLDOWN");
+        break;
+    case OBD_REC_BT:  restartBt("BT RESTART"); break;
+    case OBD_REC_SPP: rebuildLink("RE-CONNECT"); break;
+    default: break;                             // unreachable: callers pass a stuck counter
+    }
+}
+
+void ObdSource::rebuildLink(const char *msg) {
+    if (SerialBT.connected()) SerialBT.disconnect();
+    if (sppCycles_ < 255) sppCycles_++;
+    stuckSearch_ = stuckInit_ = 0;
+    retryIn(2000, S_CONNECT, msg);
+}
+
+void ObdSource::restartBt(const char *msg) {
+    if (btStarted_) { SerialBT.disconnect(); SerialBT.end(); btStarted_ = false; }
+    if (btCycles_ < 255) btCycles_++;
+    sppCycles_ = 0;                             // the new stack gets a fresh SPP budget
+    stuckSearch_ = stuckInit_ = 0;
+    retryIn(3000, S_BT_START, msg);
+}
+
 void ObdSource::begin() {
     state_ = S_BT_START;
     slot_ = 0;
@@ -275,6 +321,9 @@ void ObdSource::begin() {
     pinIdx_ = startPinIdx();
     macFails_ = 0;
     nodataRun_ = 0;
+    stuckSearch_ = stuckInit_ = 0;          // recovery ladder (issue #1) starts fresh
+    sppCycles_ = btCycles_ = 0;
+    s_reconnect = false;
     lastLambda_ = 0;
     lastLambdaAt_ = 0;
     memset(pidMask_, 0, sizeof pidMask_);
@@ -413,6 +462,13 @@ void ObdSource::poll() {
         s_scanState = 2;
         state_ = S_CONNECT;                  // resume (reconnect, to a new pick if one was made)
     }
+    if (s_reconnect) {                      // obd=reconnect: clean restart, same adapter
+        s_reconnect = false;
+        stuckSearch_ = stuckInit_ = 0;
+        sppCycles_ = 0;                      // a manual request starts the ladder fresh
+        if (btStarted_) { SerialBT.disconnect(); SerialBT.end(); btStarted_ = false; }
+        retryIn(500, S_BT_START, "RECONNECT");
+    }
     if (s_retarget) {                       // obd=… typed: drop the link, reconnect to the new target
         s_retarget = false;
         if (s_forgetBond && btStarted_ && mac_[0]) forgetBond(mac_);
@@ -451,6 +507,11 @@ void ObdSource::poll() {
         if (mac_[0] && macFails_ < maxFails) {
             strlcpy(target, mac_, sizeof target);
         } else if (scan(target)) {
+            // Forget the pairing key only when the adapter is REACHABLE and every PIN still
+            // failed (wrong device / dud bond). A sleeping adapter is invisible to the scan:
+            // keep the bond, it will connect once it wakes (issue #1).
+            if (mac_[0] && obdShouldForgetBond(macFails_, maxFails, !strcasecmp(target, mac_)))
+                forgetBond(mac_);
             strlcpy(mac_, target, sizeof mac_);     // RAM only; saved to NVS once it connects
             macFails_ = 0;
         } else {
@@ -470,7 +531,8 @@ void ObdSource::poll() {
             Serial.println("[obd] connect failed");
             if (!pin_[0]) pinIdx_ = (pinIdx_ + 1) % kPinCount;
             if (macFails_ < 255) macFails_++;
-            if (macFails_ == maxFails) forgetBond(target);   // every PIN failed: re-pair from scratch
+            // No forgetBond here: the key is only dropped once a scan SEES the adapter and
+            // every PIN has failed on it (above) — a plain timeout must not destroy pairing.
             retryIn(2000, S_CONNECT, "NO ADAPTER");
             break;
         }
@@ -498,7 +560,8 @@ void ObdSource::poll() {
         if (!elm("ATE0", OBD_CMD_TIMEOUT_MS) || !strstr(resp_, "OK")) {
             Serial.printf("[obd] init failed, ATE0 -> '%s'\n", resp_);
             if (!SerialBT.connected()) { retryIn(2000, S_CONNECT, "BT LOST"); break; }
-            retryIn(2000, S_INIT, "ELM ERROR");
+            if (++stuckInit_ >= 5) escalate();        // silent ELM on a live link: climb the ladder
+            else retryIn(2000, S_INIT, "ELM ERROR");
             break;
         }
         static const char *const opt[] = {"ATL0", "ATS0", "ATH0", "ATAT1", "ATSP0"};
@@ -539,10 +602,13 @@ void ObdSource::poll() {
             s_pids = (uint8_t)(pids > 255 ? 255 : pids);
             s_link.live();
             errors_ = 0;
+            stuckSearch_ = stuckInit_ = 0;    // issue #1: live data resets the whole ladder
+            sppCycles_ = btCycles_ = 0;
             state_ = S_RUN;
         } else {
             Serial.printf("[obd] 0100 -> '%s'\n", resp_);
-            if (!SerialBT.connected()) retryIn(2000, S_CONNECT, "BT LOST");
+            if (!SerialBT.connected()) { stuckSearch_ = 0; retryIn(2000, S_CONNECT, "BT LOST"); }
+            else if (++stuckSearch_ >= 6) escalate();   // silent ECU on a live link: climb the ladder
             else retryIn(3000, S_SEARCH, "NO ECU");   // ignition off?
         }
         break;

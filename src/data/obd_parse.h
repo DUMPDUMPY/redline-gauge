@@ -233,3 +233,26 @@ inline int obdPickOther(const uint8_t *list, size_t n, uint8_t &slot, Usable usa
     }
     return fallback;
 }
+
+// ---- Escalating recovery after a lost link --------------------------------------------
+// Pure decisions so the native tests can drive them. Counts are "since the last live data":
+// stuckSearch = consecutive failed ECU searches on a connected link, stuckInit = consecutive
+// failed ELM inits on a connected link, spp = SPP links already rebuilt, bt = Bluetooth
+// stack restarts. Rungs: rebuild the SPP link (which also re-runs ELM init) -> restart the
+// whole stack -> long cooldown, then the ladder starts over. No rung repeats forever.
+enum ObdRecovery : uint8_t { OBD_REC_NONE, OBD_REC_SPP, OBD_REC_BT, OBD_REC_COOL };
+
+inline ObdRecovery obdEscalate(uint8_t stuckSearch, uint8_t stuckInit, uint8_t spp, uint8_t bt) {
+    if (bt >= 3)  return OBD_REC_COOL;           // even restarts didn't help: pause ~30 s
+    if (spp >= 3) return OBD_REC_BT;             // a rebuilt link didn't help either
+    if (stuckSearch >= 6) return OBD_REC_SPP;    // ~1 min of silent ECU on a live link
+    if (stuckInit >= 5)   return OBD_REC_SPP;    // ~10 s of silent ELM on a live link
+    return OBD_REC_NONE;
+}
+
+// The pairing key survives connection timeouts: it is dropped only when the adapter is
+// REACHABLE (a scan sees it) and every PIN still failed. A sleeping adapter is invisible
+// to the scan — deleting its bond then just forces a re-pair once it wakes.
+inline bool obdShouldForgetBond(uint8_t macFails, uint8_t maxFails, bool reachable) {
+    return macFails >= maxFails && reachable;
+}

@@ -24,6 +24,17 @@ new features bump the middle number, fixes the last one.
 - Removed the six PID-labelled throttle/pedal debug panels; unversioned saved debug IDs fall back
   to the slot defaults rather than being reinterpreted as the new MAF item.
 
+### Added — OBD BT link recovery ([issue #1](https://github.com/DUMPDUMPY/redline-gauge/issues/1))
+- **Escalating recovery with a ceiling**: a stage that keeps failing while Bluetooth reports connected
+  (silent ELM after an ignition cycle, silent ECU on a stale link) climbs a ladder instead of looping
+  forever — rebuild the SPP link (which re-runs ELM init) -> restart the whole Bluetooth stack ->
+  30 s cooldown, then the ladder starts over. Any live data resets it.
+- **`obd=reconnect`** (serial): clean full restart on demand — same adapter, same PIN, same settings.
+- **The pairing key survives timeouts**: the bond is only dropped when a scan actually SEES the
+  adapter and every PIN has failed on it. A sleeping adapter is invisible to the scan, so parking
+  the car no longer risks destroying the pairing.
+- The Link page shows a RECOVERY row (SPP rebuilds / stack restarts) while the ladder is active.
+
 ## [2.0.2] - 2026-11-11
 
 ### Added

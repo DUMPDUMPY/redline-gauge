@@ -347,6 +347,32 @@ static void test_model_extra_telemetry_and_staleness() {
     TEST_ASSERT_FALSE(v.o2MvValid);
 }
 
+// Issue #1: recovery decisions are pure functions (obd_parse.h) so they can be tested here.
+static void test_obd_recovery_escalation() {
+    // ordinary retries stay in place
+    TEST_ASSERT_EQUAL(OBD_REC_NONE, obdEscalate(0, 0, 0, 0));
+    TEST_ASSERT_EQUAL(OBD_REC_NONE, obdEscalate(5, 4, 2, 2));
+    // a stuck stage rebuilds the SPP link (which also re-runs the ELM init)
+    TEST_ASSERT_EQUAL(OBD_REC_SPP, obdEscalate(6, 0, 0, 0));
+    TEST_ASSERT_EQUAL(OBD_REC_SPP, obdEscalate(0, 5, 0, 0));
+    // three SPP rebuilds without data -> full stack restart; three restarts -> cooldown
+    TEST_ASSERT_EQUAL(OBD_REC_BT, obdEscalate(6, 0, 3, 0));
+    TEST_ASSERT_EQUAL(OBD_REC_BT, obdEscalate(6, 0, 3, 2));
+    TEST_ASSERT_EQUAL(OBD_REC_COOL, obdEscalate(6, 0, 3, 3));
+    // the ladder only climbs: cooldown wins over everything
+    TEST_ASSERT_EQUAL(OBD_REC_COOL, obdEscalate(255, 255, 255, 3));
+    TEST_ASSERT_EQUAL(OBD_REC_BT, obdEscalate(255, 255, 3, 0));
+}
+
+static void test_obd_forget_bond_rule() {
+    TEST_ASSERT_FALSE(obdShouldForgetBond(0, 3, true));    // still cycling the PINs
+    TEST_ASSERT_FALSE(obdShouldForgetBond(2, 3, true));    // one PIN left to try
+    TEST_ASSERT_FALSE(obdShouldForgetBond(3, 3, false));   // adapter asleep/invisible: keep the bond
+    TEST_ASSERT_FALSE(obdShouldForgetBond(9, 3, false));
+    TEST_ASSERT_TRUE(obdShouldForgetBond(3, 3, true));     // reachable and still failing: re-pair
+    TEST_ASSERT_TRUE(obdShouldForgetBond(9, 3, true));
+}
+
 static void test_obd_adapter_selection() {
     TEST_ASSERT_TRUE(obdValidMac("AA:BB:CC:DD:EE:FF"));
     TEST_ASSERT_TRUE(obdValidMac("00:1d:a5:68:98:8b"));
@@ -1627,6 +1653,8 @@ int main(int, char **) {
     RUN_TEST(test_serial_ignores_garbage);
     RUN_TEST(test_obd_parse);
     RUN_TEST(test_obd_adapter_selection);
+    RUN_TEST(test_obd_recovery_escalation);
+    RUN_TEST(test_obd_forget_bond_rule);
     RUN_TEST(test_obd_supported_pid_mask);
     RUN_TEST(test_obd_hybrid_pids);
     RUN_TEST(test_honda_kline_frames);

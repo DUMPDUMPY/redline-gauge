@@ -62,12 +62,19 @@ private:
     uint8_t  pinIdx_ = 0;
     uint8_t  macFails_ = 0;
     uint8_t  nodataRun_ = 0;         // consecutive NO DATA replies
+    uint8_t  stuckSearch_ = 0;       // consecutive failed ECU searches on a connected link
+    uint8_t  stuckInit_ = 0;         // consecutive failed ELM inits on a connected link
+    uint8_t  sppCycles_ = 0;         // SPP links rebuilt since the last live data (issue #1)
+    uint8_t  btCycles_ = 0;          // Bluetooth stack restarts since the last live data
     uint32_t pidMask_[5] = {};       // supported PIDs 01-A0 (0100, 0120 … 0180), [0] = 0: unknown
     float    lastLambda_ = 0;        // cache lambda, not fuel-specific AFR, across fuel changes
     uint32_t lastLambdaAt_ = 0;
     static volatile uint8_t s_fuel;  // one coherent fuel choice shared by UI/data cores
 
     void retryIn(uint32_t ms, State then, const char *msg);
+    void escalate();                        // pick the next recovery rung (obdEscalate)
+    void rebuildLink(const char *msg);      // drop the SPP link and reconnect (counts a cycle)
+    void restartBt(const char *msg);        // restart the whole Bluetooth stack (counts a cycle)
     bool elm(const char *cmd, uint32_t timeoutMs);
     void loadTarget();
     bool scan(char *macOut);
