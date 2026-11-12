@@ -79,7 +79,8 @@ If the splash is removed or the logo is changed, the status bar shows `UNOFFICIA
 - **PANEL AUTO / STD / HYB**: right-hand panels. STD = COOLANT · VOLTAGE · INTAKE; HYB = COOLANT · HV BATT (%) · HV POWER (kW, negative = regen);
   AUTO switches to HYB as soon as the source delivers hybrid battery data (e.g. OBD on a Honda e:HEV)
 - **Tap a right-hand panel** on the gauge to change what it shows: COOLANT, VOLTAGE, INTAKE, AFR (HONDA K, OBD BT),
-  THROTTLE, FUEL LEVEL, KM/L, STFT, LTFT, MAP, IGN ADV, O2 SENSOR (mV), LOAD, or MAF (g/s, PID `0110`). It skips unsupported values
+  THROTTLE, FUEL LEVEL, FUEL RATE (shown as km/L on this build), STFT, LTFT, MAP, IGN ADV, O2 SENSOR (mV), LOAD,
+  or MAF (g/s, PID `0110`). It skips unsupported values
   and values already shown in another panel; the choice is saved. RPM, session PEAK RPM, and SPEED remain on the main display.
 - **Link pill** (HONDA K and OBD BT): the status bar shows `● ECU OK`, the connecting step (`BT PAIRING`,
   `ELM INIT` …) or a red `✕` with the reason and the seconds to the next try; **NOT CONNECTED** shows above the

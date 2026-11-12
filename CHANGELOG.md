@@ -4,46 +4,96 @@ Ready-to-flash images for every version are on the [Releases page](https://githu
 (one per panel type, see [how to flash](docs/release-flashing.md)). Versions follow [semver](https://semver.org):
 new features bump the middle number, fixes the last one.
 
-## [Unreleased]
+## [Unreleased] — jazzge on upstream v2.0.2
 
-### Added
-- **ENGINE LOAD panel** (`LOAD`, tap a right-hand panel): calculated engine load, OBD BT PID `0104`. Serial key `load=`.
-- **MAF panel** (`MAF`, G/S): mass air flow, OBD BT PID `0110` (the Jazz GE8 reports it). Serial key `maf=`.
-- **FUEL RATE estimate from airflow** (this build): when the car doesn't report PID `015E`, estimate
-  L/h as MAF x 3600 / (AFR x density). Poll MAF and lambda even when their panels are hidden. When the ECU
-  supports lambda, wait for a fresh reading; otherwise assume lambda 1.0. A reading outside lambda
-  0.63–1.85 publishes nothing, so the estimate expires to `--` (not a claim of measured fuel cut).
-- **FUEL selector** (SETUP DASHBOARD -> FUEL, serial `fuel=g91|g95|e10|e20`, saved): G91 / G95 / E10 / E20.
-  **G91/G95 mean Thai gasohol 91/95 (E10), not ethanol-free petrol.** Both and E10 use approximate
-  stoich 14.1 / density 749 g/L; E20 uses 13.5 / 754 g/L. The selection applies at boot and runtime to
-  OBD lambda->AFR, AFR rich/lean thresholds and bar range, and the fuel-rate estimate. Default E20.
-  Numeric serial `fuel=65` still means fuel level. Values are estimates, not calibrated consumption.
-- **AFR over OBD BT**: PID `0134` (O2 sensor 1 equivalence ratio, lambda) x the fuel's stoich feeds the
-  existing AFR panel. On a car with a wideband (A/F) sensor this is a measurement; an inactive sensor (engine
-  off, warming up) or a fuel cut reads about lambda 2.0.
+### Merged
+- Upstream v2.0.2: DATA WAVE / RACE CODE skins, TRIP, alerts, Thai UI, mph units, Honda model
+  profiles. This branch's own PRs (**AFR + ENGINE LOAD panel**, **poll only what the panels show**,
+  **automatic-gearbox gear tracking**) now come from upstream instead of local patches.
 
-### Changed
-- **OBD BT polls only what the three right-hand panels show.** RPM, speed and the hybrid values are always polled;
-  the panel values (coolant, voltage, intake, throttle, fuel, trims, MAP, ignition, O2, AFR, load) only while a panel
-  shows them, so the visible ones update more often. RPM is exactly every other request (a skipped entry used to
-  turn into an extra RPM request). Tapping a panel steps through the values the car supports (from its PID list),
-  not just those that happen to have fresh data right now.
-
-### Debug / this build only (branch `jazzge`, not for upstream)
-- THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`.
-- The FUEL RATE panel shows **km/L** (speed / L-h, live; 0.0 while stopped) instead of L/h — the bus and
-  the serial `fuelrate=` value stay L/h. Zero or stale fuel rate / stale speed shows `--`.
+### Kept from jazzge (this build only)
+- THROTTLE reads `0145` (relative throttle) when the car lists it, else `0111`; the panel shows one decimal.
+- **MAF panel** (PID `0110`, serial `maf=`) and FUEL RATE shown as **km/L** (speed / L-h; the bus and
+  `fuelrate=` stay L/h) — estimated from airflow when the car doesn't report `015E`.
+- **FUEL selector** (SETUP DASHBOARD -> FUEL, serial `fuel=g91|g95|e10|e20`): G91 / G95 / E10 / E20
+  (G91/G95 = Thai gasohol 91/95, i.e. E10). Stoich 14.1 / density 749 g/L for E10, 13.5 / 754 for E20;
+  applies to lambda->AFR, rich/lean thresholds, bar range and the fuel-rate estimate. Default E20.
+- **SETUP DASHBOARD page** (SETTINGS -> SETUP DASH, the bottom row under OPTIONS): GEAR AUTO / OFF,
+  RPM STEP 10 / 25 / 50 (big-number rounding, default 10; serial `rpmstep=`) and FUEL.
+- Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
 - Removed the six PID-labelled throttle/pedal debug panels; unversioned saved debug IDs fall back
   to the slot defaults rather than being reinterpreted as the new MAF item.
-- Gear estimate set for the Honda Jazz / Fit GE8 1.5 5AT (`config.h`: 5 gears, final drive 4.562, 175/65R15).
-- THROTTLE panel shows one decimal (4.7 %, not 5 %).
-- **SETUP DASHBOARD page** (SETTINGS -> SETUP, where the GEAR button was): GEAR AUTO / OFF moved in, plus a new
-  **RPM STEP 10 / 25 / 50** (big RPM number rounding, default 10, upstream 50; saved; serial `rpmstep=`) and
-  **FUEL G91 / G95 / E10 / E20**. BACK returns.
-- Automatic-gearbox gear tracking (`GEAR_HOLD 1`): when the converter slips or the engine idles while rolling
-  (lifting off at low speed) the last gear is held instead of showing N, pulling away from a stop shows 1st, the
-  held gear steps down / up with speed, an idle-coasting "match" (800 rpm at 25 km/h looks like 4th) is ignored,
-  and a new gear is shown once it has been the estimate for 150 ms. N only when stopped.
+
+## [2.0.2] - 2026-11-11
+
+### Added
+- **mph everywhere** (SETUP -> OPTIONS -> KM/H / MPH, or `units=mph`):
+  - DATA WAVE and RACE CODE show "mph" under the speed (it was always "km/h"), and TRIP reads in miles.
+  - The drag timer times **0-60, 60-80, 80-100 and 0-120 mph** in mph mode (km/h mode keeps 0-100, 100-120,
+    120-160, 0-200 km/h). The live NEXT target, result labels, speed bar, BEST and split boxes follow the unit.
+  - Each saved run remembers its unit; the RUN LOG page lists the runs timed in the selected unit, with the top
+    speed in that unit. Existing logs load unchanged (their runs are km/h runs). `timerlog` prints a unit column.
+
+## [2.0.1] - 2026-11-11
+
+### Fixed
+- **HONDA K on Giorno+ / Lead (and other non-Wave ECUs):** the gauge only asked table `0x17` (the Wave table), so an
+  ECU that answers another table showed nothing. At connect it now tries the main tables and keeps the first that
+  answers (Wave profile: `0x17` first; Giorno profile: `0x11` / `0x10` first), and decodes values by that table's
+  layout: on `0x11` / `0x10` battery comes from D16 and the ECU speed from D17; a `0x17` reply with D9 = FF reads
+  the engine temperature from D13. MAP and ECU speed are shown when the table has them.
+- **No false overheat alert when a sensor is missing:** a temperature byte of FF ("no sensor") read as 215 °C; it
+  now shows `--`.
+- Not yet checked against a real Giorno+ / Lead ECU or the bench ECU simulator: the `0x11` layout follows the
+  reference gauge's decoder. Serial `kdump` lists every table the ECU answers if values look wrong.
+
+## [2.0.0] - 2026-11-11
+
+### Added
+- **Skins** (SETTINGS -> SKIN, serial `skin=default|datawave|race`): next to the original layout (DEFAULT),
+  - **DATA WAVE**: big speed + gear on the left, RPM and three value rows on the right, each with a scrolling
+    graph of its recent history.
+  - **RACE CODE**: a round rev dial whose segmented arc lights up with rpm (yellow -> orange -> red near the
+    redline), speed and RPM in the hub, gear below, three value tiles on the left.
+  Both skins' value slots are the same three panel items as DEFAULT: tap a slot to step to the next value the
+  source actually delivers (OBD BT car values or HONDA K bike values). Label, unit and icon follow the value.
+- **TRIP** distance (integrated from speed since power-on) on both new skins.
+- **Alerts** (SETTINGS -> ALERT): overheat, low battery and hot-intake warnings as a flashing banner + LED +
+  beep (repeats every 4 s), each with an adjustable threshold. Serial `alerts=on|off`.
+- **Honda model profile** (HONDA source -> MODEL, serial `hmodel=wave|giorno`): Wave 110i (air-cooled, OIL
+  TEMP, shift 8500) or Giorno / Lead (COOLANT, shift 9000).
+- **ENGINE LOAD panel** (`LOAD`, tap a right-hand panel): calculated engine load, OBD BT PID `0104`. Serial key `load=`.
+- **AFR over OBD BT**: PID `0134` (O2 sensor 1 equivalence ratio, lambda) x `OBD_AFR_STOICH` (14.7) feeds the
+  existing AFR panel. On a car with a wideband (A/F) sensor this is a measurement; an inactive sensor (engine
+  off, warming up) or a fuel cut reads about lambda 2.0 (29.4).
+- **mph speed units** (SETUP -> OPTIONS -> tap the KM/H / MPH toggle, or `units=kmh|mph`): the main speed
+  gauge and the drag timer's live / top speed read in mph; data stays km/h internally. Default km/h.
+  (The drag-timer milestones 0-100 / 0-200 stay km/h for now.)
+
+### Changed
+- **THEME applies to the DEFAULT skin only** (the new skins use fixed artwork); the SKIN chip now sits left of
+  THEME in SETTINGS.
+- **HONDA K AFR** is only shown while the O2 sensor is switching (engine running, sensor warm); otherwise `--`
+  instead of a misleading number. The raw O2 voltage is always available.
+- **Thai UI**: panel labels translated, a smaller Thai font for small captions; numbers keep the Barlow font.
+- TOUCH and CUSTOM data sources are no longer offered on the settings page (still available over serial).
+- **Automatic-gearbox gear tracking** (`GEAR_HOLD` in config.h): when the torque converter slips or the engine
+  idles while rolling (pulling away, lifting off at low speed) the last gear is held instead of showing N,
+  pulling away from a stop shows 1st, the held gear steps down / up with speed, an idle-coasting "match"
+  (800 rpm at 25 km/h can coincide with a tall gear) is ignored, and a new gear shows once it has been the
+  estimate for 150 ms so one stale sample doesn't flicker it. N only when stopped. `GEAR_HOLD 0` restores
+  the old behaviour (N whenever nothing fits).
+- **SETTINGS page redesign**: the on/off options (BEEP, GEAR, UNITS, PANELS, K-UART, RESET PEAK) moved into
+  an OPTIONS zone of checkbox toggles, making room without crowding; themes, data source and shift RPM unchanged.
+
+## [1.9.3] - 2026-11-04
+
+### Fixed
+- **ST7789 build now matches the official CYD2USB config** (the 1.9.1/1.9.2 ST7789 images could show a
+  white screen). It uses the portrait-native 240x320 geometry, software reset (RST off GPIO, MISO on 12),
+  BGR colour order and inversion off, per witnessmenow's CYD2USB User_Setup. A `[tft]` line is printed at
+  boot (driver + resolution) to make display issues easier to diagnose, and a build guard now errors if two
+  TFT drivers are ever defined at once.
 
 ## [1.9.2] - 2026-11-04
 

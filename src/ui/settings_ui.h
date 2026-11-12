@@ -21,6 +21,7 @@ extern const char *const kPanelLabels[PANELS_COUNT];
 extern const uint8_t kRpmSteps[3];             // the RPM STEP choices on the SETUP DASHBOARD page
 
 void   draw(const Settings &s);                 // full repaint (open / after a change)
+void   openMain();                              // reset to the main page (call when (re)opening)
 Action tap(int x, int y, Settings &s);          // handle a tap; edits s, repaints if needed
 
 }

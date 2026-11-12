@@ -32,6 +32,7 @@
 #include "fonts/font_speed.h"
 #include "fonts/font_ui.h"
 #include "fonts/font_value.h"
+#include "fonts/font_th.h"
 
 extern uint32_t g_host_ms;
 
@@ -111,9 +112,40 @@ static void test_fonts_cover_every_ui_string() {
 }
 
 static void test_font_tables_sorted() {
-    const GaugeFont *fonts[] = { &font_rpm, &font_speed, &font_value, &font_label, &font_small, &font_ui };
+    const GaugeFont *fonts[] = { &font_rpm, &font_speed, &font_value, &font_label, &font_small, &font_ui, &font_th };
     for (const GaugeFont *f : fonts)
         for (int i = 1; i < f->count; i++) TEST_ASSERT_TRUE(f->glyphs[i - 1].code < f->glyphs[i].code);
+}
+
+// Thai support: combining marks must have zero advance (they stack on the base),
+// add no text width, and render without writing outside the canvas region.
+static void test_thai_combining_marks() {
+    const GaugeGlyph *baseK = nullptr, *tone = nullptr, *lowerU = nullptr;
+    for (int i = 0; i < font_th.count; i++) {
+        uint16_t c = font_th.glyphs[i].code;
+        if (c == 0x0E01) baseK = &font_th.glyphs[i];   // ก consonant
+        if (c == 0x0E48) tone = &font_th.glyphs[i];    // ่ mai ek (upper tone)
+        if (c == 0x0E38) lowerU = &font_th.glyphs[i];  // ◌ุ sara u (lower vowel)
+    }
+    TEST_ASSERT_NOT_NULL(baseK);
+    TEST_ASSERT_NOT_NULL(tone);
+    TEST_ASSERT_NOT_NULL(lowerU);
+    TEST_ASSERT_TRUE(baseK->adv > 0);                  // base advances the pen
+    TEST_ASSERT_EQUAL_INT(0, tone->adv);               // combining marks do not
+    TEST_ASSERT_EQUAL_INT(0, lowerU->adv);
+    TEST_ASSERT_TRUE(tone->dy > 2);                    // upper tone sits above baseline
+
+    static uint16_t buf[320 * 48];
+    static uint16_t bg[320 * 240];
+    Canvas cv(buf, 320 * 48);
+    TEST_ASSERT_TRUE(cv.begin(0, 0, 320, 48, bg));
+    int wBase   = cv.textWidth(font_th, "\xE0\xB8\x81");                  // ก
+    int wMarked = cv.textWidth(font_th, "\xE0\xB8\x81\xE0\xB9\x88");      // ก่  (ก + tone)
+    int wTwo    = cv.textWidth(font_th, "\xE0\xB8\x81\xE0\xB8\x81");      // กก
+    TEST_ASSERT_EQUAL_INT(wBase, wMarked);             // mark adds no width
+    TEST_ASSERT_EQUAL_INT(2 * wBase, wTwo);            // two bases do advance twice
+    // ตั้งค่า has a stacked tone-over-vowel cluster; must render clip-safe.
+    cv.text(font_th, 4, 30, "\xE0\xB8\x95\xE0\xB8\xB1\xE0\xB9\x89\xE0\xB8\x87\xE0\xB8\x84\xE0\xB9\x88\xE0\xB8\xB2", rgb565(0xFFFFFF));
 }
 
 // ---- theme assets ---------------------------------------------------------------------------
@@ -454,6 +486,32 @@ static void test_drag_timer_constant_accel() {
     TEST_ASSERT_UINT16_WITHIN(15, 2000, r.cs[SEG_0_200]);
     TEST_ASSERT_UINT16_WITHIN(10, 400, r.cs[SEG_160_200]);
     for (int s = 0; s < SEG_COUNT; s++) TEST_ASSERT_TRUE(d.t.newBest(s));   // empty log: all best
+}
+
+// mph: splits at 60 / 80 / 100 / 120 mph; the run is tagged mph in the log and only competes with mph runs
+static void test_drag_timer_mph() {
+    DragSim d;
+    d.t.setMph(true);
+    d.t.again();
+    for (int i = 0; i < 8; i++) d.feed(0);
+    uint32_t launch = d.ms + 70;
+    while (d.t.state() != TS_FINISH && d.ms < launch + 40000) {
+        uint32_t next = d.ms + 200;
+        d.feed(next > launch ? (next - launch) / 1000.0f * 10.0f : 0, 200, false);   // 10 km/h per s
+    }
+    TEST_ASSERT_EQUAL(TS_FINISH, d.t.state());                      // 120 mph = 193 km/h, before 200
+    const RunRecord &r = d.t.record();
+    TEST_ASSERT_UINT16_WITHIN(15, 966, r.cs[SEG_0_100]);             // 0-60 mph = 96.6 km/h -> 9.66 s
+    TEST_ASSERT_UINT16_WITHIN(15, 1931, r.cs[SEG_0_200]);            // 0-120 mph = 193.1 km/h
+    TEST_ASSERT_EQUAL_UINT16(RUN_MPH, r.seq & RUN_MPH);
+    TEST_ASSERT_EQUAL(120, d.t.thLabel(3));
+    RunLog log;
+    log.add(r);
+    TEST_ASSERT_EQUAL_UINT16(RUN_MPH | 1, log.runs[0].seq);         // number kept, mph flag kept
+    TEST_ASSERT_EQUAL_UINT16(RUN_NONE, log.best(SEG_0_100, false));  // not a km/h best
+    TEST_ASSERT_UINT16_WITHIN(15, 966, log.best(SEG_0_100, true));
+    d.t.setMph(false);                                              // back to km/h: 0-200 again
+    TEST_ASSERT_EQUAL(200, d.t.thLabel(3));
 }
 
 static void test_drag_timer_lift_and_arming() {
@@ -906,7 +964,8 @@ static void test_obd_polls_only_shown_items() {
 }
 
 static void test_gear_tracking_automatic() {
-#if GEAR_COUNT == 5 && GEAR_HOLD
+#if GEAR_COUNT >= 2 && GEAR_HOLD
+    static const float ratios[GEAR_COUNT] = GEAR_RATIOS;
     int cand = 0;
     uint32_t candAt = 0;
     // standing still: N
@@ -926,14 +985,16 @@ static void test_gear_tracking_automatic() {
     TEST_ASSERT_EQUAL_INT(3, trackGear(3, 4, 2400, 40, cand, candAt, 2100));      // timer restarted
     // lifting off at low speed: rpm falls to idle, nothing fits, the gear is held ...
     TEST_ASSERT_EQUAL_INT(2, trackGear(2, 0, 800, 25, cand, candAt, 3000));
-    // 800 rpm at 25 km/h happens to fit 4th (idle coasting); it must not become the gear
+    // idle coasting can coincide with a tall gear (800 rpm at 25 km/h); it must not become the gear
     TEST_ASSERT_EQUAL_INT(2, trackGear(2, 4, 800, 25, cand, candAt, 3050));
     TEST_ASSERT_EQUAL_INT(2, trackGear(2, 4, 800, 25, cand, candAt, 3050 + 3 * GEAR_CONFIRM_MS));
-    // ... and steps down as the car slows, since 2nd can't turn the engine that slowly
-    TEST_ASSERT_EQUAL_INT(1, trackGear(2, 0, 800, 12, cand, candAt, 3100));
+    // ... and steps down as the car slows: at this speed 2nd would run below GEAR_HOLD_MIN_RPM
+    float v2low = (GEAR_HOLD_MIN_RPM - 100) * 3.6f * TIRE_CIRCUMFERENCE_M / (60.0f * ratios[1] * FINAL_DRIVE);
+    TEST_ASSERT_EQUAL_INT(1, trackGear(2, 0, 800, v2low, cand, candAt, 3100));
     TEST_ASSERT_EQUAL_INT(0, trackGear(1, 0, 800, 2, cand, candAt, 3200));        // and N once stopped
     // the held gear also moves up when the engine could not be turning that fast in it
-    TEST_ASSERT_EQUAL_INT(2, trackGear(1, 0, 3000, 50, cand, candAt, 3300));
+    float v1high = (GEAR_HOLD_MAX_RPM + 500) * 3.6f * TIRE_CIRCUMFERENCE_M / (60.0f * ratios[0] * FINAL_DRIVE);
+    TEST_ASSERT_EQUAL_INT(2, trackGear(1, 0, 3000, v1high, cand, candAt, 3300));
 
     // through the model: lift-off keeps the gear, a stop shows N
     GaugeModel m;
@@ -950,7 +1011,7 @@ static void test_gear_tracking_automatic() {
         m.update(s, g_host_ms, "TEST", v);
     };
     float wheel25 = (25 / 3.6f) / TIRE_CIRCUMFERENCE_M * 60.0f;
-    for (int i = 0; i < 20; i++) frame(wheel25 * 1.678f * FINAL_DRIVE, 25);      // 2nd, locked
+    for (int i = 0; i < 20; i++) frame(wheel25 * ratios[1] * FINAL_DRIVE, 25);   // 2nd, locked
     TEST_ASSERT_EQUAL_INT(2, v.gear);
     for (int i = 0; i < 20; i++) frame(800, 25);                                   // lifted off: rpm to idle
     TEST_ASSERT_EQUAL_INT(2, v.gear);
@@ -1003,6 +1064,47 @@ static void test_honda_kline_frames() {
     uint8_t s[] = { 0x02, 0x08, 0x71, 0x17, 0x05, 0xDC, 0x33, 0 };   // too short
     s[7] = hkChecksum(s, 7);
     TEST_ASSERT_FALSE(hkDecodeMain(s, sizeof s, d));
+
+    // Engine temp byte FF = no sensor: no temperature (was 215 C -> a false overheat alarm)
+    g[9] = 0xFF; g[18] = hkChecksum(g, 18);
+    // ...and on table 0x17 a D9 of FF means the other layout: temp in D13, no intake air / MAP
+    g[13] = 0x82; g[18] = hkChecksum(g, 18);                     // D13 = 0x82
+    TEST_ASSERT_TRUE(hkDecodeMain(g, sizeof g, d));
+    TEST_ASSERT_FALSE(d.hasIat);
+    TEST_ASSERT_FALSE(d.hasMap);
+    TEST_ASSERT_TRUE(d.hasTemp);
+    TEST_ASSERT_EQUAL_FLOAT(90, d.temp);                         // D13 0x82 - 40
+    TEST_ASSERT_FALSE(d.hasSpeed);                               // 14 data bytes: no D19
+    g[13] = 0xFF; g[18] = hkChecksum(g, 18);
+    TEST_ASSERT_TRUE(hkDecodeMain(g, sizeof g, d));
+    TEST_ASSERT_FALSE(d.hasTemp);                                // both FF: no temperature at all
+
+    // Table 0x11 (Lead / Giorno+ / PCX): temp D9, intake D11, MAP D13, battery D16, speed D17
+    uint8_t t11[23] = { 0x02, 0x17, 0x71, 0x11,
+                        0x0B, 0xB8,             // D4-5  3000 rpm
+                        0x33, 0x28,             // D6-7  TPS 0x28 * 0.5 = 20
+                        0x50, 0x82,             // D9    90 C
+                        0x8F, 0x4B,             // D11   35 C
+                        0x5A, 0x41,             // D13   65 kPa
+                        0x00, 0x80,
+                        0x8B,                   // D16   13.9 V
+                        0x2A,                   // D17   42 km/h
+                        0, 0, 0, 0, 0 };
+    t11[22] = hkChecksum(t11, 22);
+    TEST_ASSERT_TRUE(hkDecodeMain(t11, sizeof t11, 0x11, d));
+    TEST_ASSERT_EQUAL_FLOAT(3000, d.rpm);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 20, d.tps);
+    TEST_ASSERT_TRUE(d.hasTemp);   TEST_ASSERT_EQUAL_FLOAT(90, d.temp);
+    TEST_ASSERT_TRUE(d.hasIat);    TEST_ASSERT_EQUAL_FLOAT(35, d.iat);
+    TEST_ASSERT_TRUE(d.hasMap);    TEST_ASSERT_EQUAL_FLOAT(65, d.map);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 13.9f, d.batt);
+    TEST_ASSERT_TRUE(d.hasSpeed);  TEST_ASSERT_EQUAL_FLOAT(42, d.speed);
+    TEST_ASSERT_FALSE(hkDecodeMain(t11, sizeof t11, 0x17, d));  // asked 0x17, got 0x11: rejected
+    // the Wave table keeps its own layout: battery D14, no speed
+    TEST_ASSERT_TRUE(hkDecodeMain(w100, sizeof w100, 0x17, d));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 11.6f, d.batt);
+    TEST_ASSERT_FALSE(d.hasSpeed);
+    TEST_ASSERT_FALSE(d.hasMap);
 }
 
 // ---- touch calibration --------------------------------------------------------------------------
@@ -1240,24 +1342,37 @@ static void test_partial_redraw_matches_full_redraw() {
 static void test_settings_taps() {
     gauge_ui::begin(push, kThemes[0]);
     Settings s;
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(260, 80, s));   // 3rd theme card
+    // THEME is now a chip that opens a sub-page of cards (no live preview).
+    settings_ui::openMain();
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(240, 60, s));      // THEME chip -> theme page (DEFAULT skin)
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(160, 186, s));  // 3rd theme card (AMBER)
     TEST_ASSERT_EQUAL_UINT8(2, s.theme);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(260, 80, s));      // same again: no-op
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(203, 163, s));  // CUSTOM source
-    TEST_ASSERT_EQUAL_UINT8(SRC_CUSTOM, s.source);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(247, 163, s));  // HONDA source
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(282, 15, s));      // BACK -> main
+    // Other skins have fixed artwork: the THEME chip does not open, a tap stays on the main page.
+    s.skin = SKIN_RACE_CODE;
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(240, 60, s));
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(282, 14, s));     // still main: DONE closes
+    s.skin = SKIN_DEFAULT;
+    settings_ui::openMain();
+    // DATA SOURCE: TOUCH and CUSTOM are hidden; shown order SIM, SERIAL, OBD BT, HONDA.
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(71, 106, s));   // SERIAL source
+    TEST_ASSERT_EQUAL_UINT8(SRC_SERIAL, s.source);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(213, 106, s));     // no model chip when not HONDA
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(159, 106, s));  // HONDA source
     TEST_ASSERT_EQUAL_UINT8(SRC_HONDA, s.source);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(300, 163, s));     // no 7th source (H TEST gone)
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(280, 14, s));     // DONE
-    TEST_ASSERT_EQUAL(settings_ui::ACT_RESET_PEAK, settings_ui::tap(98, 229, s));
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(159, 229, s));  // PANELS cycles
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(282, 14, s));     // DONE
+    TEST_ASSERT_EQUAL(settings_ui::ACT_RESET_PEAK, settings_ui::tap(211, 208, s));
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(54, 208, s));   // PANELS cycles
     TEST_ASSERT_EQUAL_UINT8(PANELS_STANDARD, s.panels);
-    settings_ui::tap(159, 229, s);
+    settings_ui::tap(54, 208, s);
     TEST_ASSERT_EQUAL_UINT8(PANELS_HYBRID, s.panels);
-    settings_ui::tap(159, 229, s);
+    settings_ui::tap(54, 208, s);
     TEST_ASSERT_EQUAL_UINT8(PANELS_AUTO, s.panels);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(118, 190, s));  // GEAR
+    TEST_ASSERT_EQUAL_UINT8(GEARMODE_OFF, s.gearMode);
+    settings_ui::tap(118, 190, s);
     TEST_ASSERT_EQUAL_UINT8(GEARMODE_AUTO, s.gearMode);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(220, 229, s));     // SETUP: opens the dashboard page ...
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(44, 229, s));     // SETUP: opens the dashboard page ...
     TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(120, 81, s));   // ... GEAR OFF
     TEST_ASSERT_EQUAL_UINT8(GEARMODE_OFF, s.gearMode);
     TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(120, 81, s));      // already off: no-op
@@ -1277,11 +1392,52 @@ static void test_settings_taps() {
     TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(280, 14, s)); // BACK (same spot as DONE)
     TEST_ASSERT_EQUAL(settings_ui::ACT_CLOSE, settings_ui::tap(280, 14, s));     // main page again: DONE closes
     TEST_ASSERT_EQUAL_UINT8(2, s.klineUart);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(282, 229, s));  // K-UART toggles
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(138, 208, s));  // K-UART toggles
     TEST_ASSERT_EQUAL_UINT8(0, s.klineUart);
-    settings_ui::tap(282, 229, s);
+    settings_ui::tap(138, 208, s);
     TEST_ASSERT_EQUAL_UINT8(2, s.klineUart);
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(160, 144, s));     // between theme names and sources
+    TEST_ASSERT_EQUAL_UINT8(0, s.units);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(193, 190, s));  // UNITS km/h <-> mph
+    TEST_ASSERT_EQUAL_UINT8(1, s.units);
+    settings_ui::tap(193, 190, s);
+    TEST_ASSERT_EQUAL_UINT8(0, s.units);
+    TEST_ASSERT_EQUAL_UINT8(0, s.lang);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(272, 190, s));  // LANG EN <-> TH
+    TEST_ASSERT_EQUAL_UINT8(1, s.lang);
+    settings_ui::tap(272, 190, s);
+    TEST_ASSERT_EQUAL_UINT8(0, s.lang);
+    // ALERT opens a sub-page (sub-page coords are absolute, unchanged by the main-page reflow).
+    TEST_ASSERT_TRUE(s.alerts);                                                  // default on
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(280, 208, s));     // tap ALERT -> opens page
+    TEST_ASSERT_EQUAL(settings_ui::ACT_CHANGED, settings_ui::tap(60, 54, s));    // master toggle off
+    TEST_ASSERT_FALSE(s.alerts);
+    settings_ui::tap(60, 54, s);
+    TEST_ASSERT_TRUE(s.alerts);
+    TEST_ASSERT_EQUAL_UINT8(COOLANT_CRIT, s.alertCoolant);
+    settings_ui::tap(277, 84, s);                                                // overheat +
+    TEST_ASSERT_EQUAL_UINT8(COOLANT_CRIT + 1, s.alertCoolant);
+    settings_ui::tap(163, 84, s);                                                // overheat -
+    TEST_ASSERT_EQUAL_UINT8(COOLANT_CRIT, s.alertCoolant);
+    settings_ui::tap(277, 126, s);                                               // low-batt +
+    TEST_ASSERT_EQUAL_UINT8(119, s.alertVoltLo);
+    settings_ui::tap(87, 218, s);                                                // RESET DEFAULT
+    TEST_ASSERT_EQUAL_UINT8(118, s.alertVoltLo);
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(282, 15, s));      // BACK -> main page
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(160, 160, s));     // empty gap -> no-op
+
+    // HONDA model sub-page: tap HONDA again (already the source) to open; pick a model.
+    s.source = SRC_HONDA;
+    settings_ui::openMain();
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(159, 106, s));     // HONDA again -> model page
+    TEST_ASSERT_EQUAL_UINT8(HM_WAVE110, s.hondaModel);                           // default
+    settings_ui::tap(160, 148, s);                                              // pick GIORNO card
+    TEST_ASSERT_EQUAL_UINT8(HM_GIORNO, s.hondaModel);
+    TEST_ASSERT_EQUAL_UINT16(9000, s.shiftRpm);                                 // Giorno default shift
+    settings_ui::tap(160, 84, s);                                              // pick WAVE card
+    TEST_ASSERT_EQUAL_UINT8(HM_WAVE110, s.hondaModel);
+    TEST_ASSERT_EQUAL_UINT16(8500, s.shiftRpm);                                 // Wave default shift
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(282, 15, s));      // BACK
+    settings_ui::openMain();
 }
 
 static void test_rpm_step() {
@@ -1435,23 +1591,23 @@ static void test_model_fuel_afr_levels() {
 static void test_settings_limits() {
     gauge_ui::begin(push, kThemes[0]);
     Settings s;
-    for (int i = 0; i < 40; i++) settings_ui::tap(129, 205, s);                  // SHIFT +
+    for (int i = 0; i < 40; i++) settings_ui::tap(118, 147, s);                  // SHIFT +
     TEST_ASSERT_EQUAL_UINT16(Settings::kShiftMax, s.shiftRpm);
-    for (int i = 0; i < 40; i++) settings_ui::tap(21, 205, s);                   // SHIFT -
+    for (int i = 0; i < 40; i++) settings_ui::tap(20, 147, s);                   // SHIFT -
     TEST_ASSERT_EQUAL_UINT16(Settings::kShiftMin, s.shiftRpm);
 #if BACKLIGHT_DIMMING
-    for (int i = 0; i < 10; i++) settings_ui::tap(181, 205, s);                  // BRIGHTNESS -
+    for (int i = 0; i < 10; i++) settings_ui::tap(180, 147, s);                  // BRIGHTNESS -
     TEST_ASSERT_EQUAL_UINT8(Settings::kBrightMin, s.brightness);
-    for (int i = 0; i < 10; i++) settings_ui::tap(289, 205, s);                  // BRIGHTNESS +
+    for (int i = 0; i < 10; i++) settings_ui::tap(280, 147, s);                  // BRIGHTNESS +
     TEST_ASSERT_EQUAL_UINT8(100, s.brightness);
 #else
     s.brightness = 100;                                                          // row hidden: taps ignored
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(181, 205, s));
-    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(289, 205, s));
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(180, 147, s));
+    TEST_ASSERT_EQUAL(settings_ui::ACT_NONE, settings_ui::tap(280, 147, s));
     TEST_ASSERT_EQUAL_UINT8(100, s.brightness);
 #endif
     bool beep = s.beep;
-    settings_ui::tap(40, 229, s);                                                // BEEP toggle
+    settings_ui::tap(43, 190, s);                                                // BEEP toggle
     TEST_ASSERT_NOT_EQUAL(beep, s.beep);
 }
 
@@ -1463,6 +1619,7 @@ int main(int, char **) {
     RUN_TEST(test_tabular_digits_have_equal_width);
     RUN_TEST(test_fonts_cover_every_ui_string);
     RUN_TEST(test_font_tables_sorted);
+    RUN_TEST(test_thai_combining_marks);
     RUN_TEST(test_theme_backgrounds_match_slot_geometry);
     RUN_TEST(test_serial_key_value);
     RUN_TEST(test_serial_json_and_aliases);
@@ -1479,6 +1636,7 @@ int main(int, char **) {
     RUN_TEST(test_extra_panel_items_are_selectable);
     RUN_TEST(test_touch_cal_solve);
     RUN_TEST(test_drag_timer_constant_accel);
+    RUN_TEST(test_drag_timer_mph);
     RUN_TEST(test_drag_timer_lift_and_arming);
     RUN_TEST(test_drag_timer_throttle_start);
     RUN_TEST(test_run_log);

@@ -26,9 +26,12 @@
 #include "data/honda_source.h"
 #include "ui/link_ui.h"
 #include "ui/scan_ui.h"
+#include "ui/i18n.h"
 #include "data/obd_source.h"
 #include "ui/gauge_model.h"
 #include "ui/gauge_ui.h"
+#include "ui/v2/data_wave_ui.h"
+#include "ui/v2/race_code_ui.h"
 #include "ui/settings_ui.h"
 #include "ui/splash_ui.h"
 #include "ui/theme.h"
@@ -107,6 +110,19 @@ static void loadSettings() {
     if (settings.fuel >= FUEL_COUNT) settings.fuel = FUEL_E20;
     settings.klineUart = prefs.getUChar("kuart", settings.klineUart);
     if (settings.klineUart != 0 && settings.klineUart != 2) settings.klineUart = 2;
+    settings.units = prefs.getUChar("units", settings.units) ? 1 : 0;
+    settings.lang = prefs.getUChar("lang", settings.lang) ? 1 : 0;
+    settings.hondaModel = prefs.getUChar("hmodel", settings.hondaModel);
+    if (settings.hondaModel >= HM_COUNT) settings.hondaModel = HM_WAVE110;
+    settings.skin = prefs.getUChar("skin", settings.skin);
+    if (settings.skin >= SKIN_COUNT) settings.skin = SKIN_DEFAULT;
+    settings.alerts = prefs.getBool("alerts", settings.alerts);
+    settings.alertCoolant = prefs.getUChar("alcool", settings.alertCoolant);
+    settings.alertVoltLo  = prefs.getUChar("alvlo", settings.alertVoltLo);
+    settings.alertIat     = prefs.getUChar("aliat", settings.alertIat);
+    settings.alertCoolant = constrain(settings.alertCoolant, Settings::kCoolMin, Settings::kCoolMax);
+    settings.alertVoltLo  = constrain(settings.alertVoltLo, Settings::kVLoMin, Settings::kVLoMax);
+    settings.alertIat     = constrain(settings.alertIat, Settings::kIatMin, Settings::kIatMax);
     if (settings.panels >= PANELS_COUNT) settings.panels = PANELS_AUTO;
     if (settings.gearMode >= GEARMODE_COUNT) settings.gearMode = GEARMODE_AUTO;
     if (settings.theme >= THEME_COUNT) settings.theme = 0;
@@ -132,6 +148,14 @@ static void saveSettings() {   // Preferences only writes keys whose value chang
     prefs.putUChar("rpmstep", settings.rpmStep);
     prefs.putUChar("fuel", settings.fuel);
     prefs.putUChar("kuart", settings.klineUart);
+    prefs.putUChar("units", settings.units);
+    prefs.putUChar("lang", settings.lang);
+    prefs.putUChar("hmodel", settings.hondaModel);
+    prefs.putUChar("skin", settings.skin);
+    prefs.putBool("alerts", settings.alerts);
+    prefs.putUChar("alcool", settings.alertCoolant);
+    prefs.putUChar("alvlo", settings.alertVoltLo);
+    prefs.putUChar("aliat", settings.alertIat);
 }
 
 static void backlightBegin() {
@@ -160,6 +184,9 @@ static void setBacklight(uint8_t pct) {
 // Read in loop() (core 1), NOT in the data task: the OBD source can sit in a blocking
 // Bluetooth connect for 10+ s, and commands must still work meanwhile.
 static void applySettings(const Settings &next, bool repaint = true);
+static void skinSetTheme(uint8_t theme);
+static void skinRender(const GaugeView &v);
+static int  skinLastPushed();
 static GaugeModel model;
 static void printHelp() {
     Serial.println(F(
@@ -170,6 +197,7 @@ static void printHelp() {
         "  touchcal (or BOOT button)   touchcal=reset   touchcal=xmin,xmax,ymin,ymax,axis\n"
         "  timer   timerlog   timerlog=clear   kdump (HONDA K raw tables)   klineinvert=on|off\n"
         "  klineuart=2|0 (HONDA K pins: 2=GPIO22/27, 0=GPIO3/1 USB header; 0 turns the USB log off)\n"
+        "  units=kmh|mph (speed display)   lang=en|th (UI language)\n"
         "  obd=scan | obd=AA:BB:CC:DD:EE:FF   obdpin=1234|0000 (empty = auto)\n"
         "data (SERIAL mode):  rpm=3200 spd=86 clt=87 volt=13.9 iat=42 tps=30 fuel=65\n"
         "           or JSON:  {\"rpm\":3200,\"speed\":86,\"coolant\":87,\"voltage\":13.9}\n"
@@ -288,6 +316,19 @@ static void handleLine(char *line) {
     } else if (!strncasecmp(p, "timer", 5)) {
         openTimer();
         return;
+    } else if (keyIs(p, "units", &v)) {
+        s.units = (!strncasecmp(v, "mph", 3)) ? 1 : 0;
+    } else if (keyIs(p, "lang", &v)) {
+        s.lang = (!strncasecmp(v, "th", 2)) ? 1 : 0;
+    } else if (keyIs(p, "alerts", &v)) {
+        s.alerts = (!strncasecmp(v, "on", 2) || *v == '1');
+    } else if (keyIs(p, "hmodel", &v)) {
+        s.hondaModel = (!strncasecmp(v, "gior", 4) || !strncasecmp(v, "lead", 4)) ? HM_GIORNO : HM_WAVE110;
+        s.shiftRpm = (s.hondaModel == HM_GIORNO) ? 9000 : 8500;
+    } else if (keyIs(p, "skin", &v)) {
+        s.skin = (!strncasecmp(v, "data", 4) || !strncasecmp(v, "wave", 4)) ? SKIN_DATA_WAVE
+               : (!strncasecmp(v, "race", 4))                                ? SKIN_RACE_CODE
+                                                                             : SKIN_DEFAULT;
     } else if (keyIs(p, "klineuart", &v)) {
         s.klineUart = (atoi(v) == 0) ? 0 : 2;          // applied below via applySettings
     } else if (keyIs(p, "klineinvert", &v)) {
@@ -426,16 +467,23 @@ static void setLed(bool r, bool g, bool b) {       // active LOW
 
 static void updateOutputs(const GaugeView *v) {
     static bool wasShift = false, wasCrit = false;
+    static uint32_t nextCritBeep = 0;
     bool shift = v && v->shift;
-    bool crit = v && ((v->coolValid && v->coolLvl == LV_CRIT) || (v->voltValid && v->voltLvl == LV_CRIT) ||
-                      (v->iatValid && v->iatLvl == LV_CRIT));
+    // Critical warnings (LED + beep) are gated by the ALERT setting, like the on-screen banner.
+    bool crit = settings.alerts && v &&
+                ((v->coolValid && v->coolLvl == LV_CRIT) || (v->voltValid && v->voltLvl == LV_CRIT) ||
+                 (v->iatValid && v->iatLvl == LV_CRIT));
 
     if (shift)      setLed(v->shiftFlash, false, false);      // red strobe = shift now
     else if (crit)  setLed(v->blink, v->blink, false);         // amber blink = check a gauge
     else            setLed(false, false, false);
 
     if (shift && !wasShift) beep(3200, 70);
-    if (crit && !wasCrit && !shift) beep(1100, 180);
+    // Beep on entering a critical state, then nag every 4 s while it persists (unless shifting).
+    if (crit && !shift && (!wasCrit || (int32_t)(millis() - nextCritBeep) >= 0)) {
+        beep(1100, 180);
+        nextCritBeep = millis() + 4000;
+    }
     wasShift = shift;
     wasCrit = crit;
 
@@ -471,13 +519,14 @@ static void saveRunLog() {
 }
 
 static void printRunLog() {
-    static const char *const names[SEG_COUNT] = { "0-100", "100-120", "120-160", "0-200", "160-200" };
-    Serial.printf("run");
+    // segments are km/h splits (0-100 ..) for km/h runs and 0-60 / 60-80 / 80-100 / 0-120 / 100-120 mph for mph runs
+    static const char *const names[SEG_COUNT] = { "split1", "split2", "split3", "full", "last" };
+    Serial.printf("run,unit");
     for (const char *n : names) Serial.printf(",%s", n);
     Serial.println(",max_kmh,to_max_s");
     for (int i = runLog.count - 1; i >= 0; i--) {             // oldest first, like a spreadsheet
         const RunRecord &r = runLog.runs[i];
-        Serial.printf("%u", r.seq);
+        Serial.printf("%u,%s", r.seq & 0x7FFF, (r.seq & RUN_MPH) ? "mph" : "kmh");
         for (int s = 0; s < SEG_COUNT; s++)
             if (r.cs[s] == RUN_NONE) Serial.print(",");
             else Serial.printf(",%u.%02u", r.cs[s] / 100, r.cs[s] % 100);
@@ -535,15 +584,25 @@ static void applySettings(const Settings &next, bool repaint) {
     model.setFuel(next.fuel);
     gauge_ui::setPanelItems(next.panelItem);
     gauge_ui::setFuelStoich(kFuels[next.fuel < FUEL_COUNT ? next.fuel : FUEL_E20].stoich);
-    ObdSource::setShownItems(next.panelItem);
     ObdSource::setFuel(next.fuel);
+    gauge_ui::setUnits(next.units);
+    data_wave_ui::setUnits(next.units);
+    race_code_ui::setUnits(next.units);
+    timer_ui::setUnits(next.units);
+    dragTimer.setMph(next.units != 0);              // splits 0-60/60-80/80-100/0-120 mph
+    gauge_ui::setAlertsEnabled(next.alerts);
+    gauge_ui::setTempIsOil(next.source == SRC_HONDA && next.hondaModel == HM_WAVE110);   // Wave = air-cooled (OIL TEMP)
+    HondaKSource::setPreferWave(next.hondaModel == HM_WAVE110);   // which main table to try first
+    model.setAlertThresholds(next.alertCoolant, next.alertVoltLo / 10.0f, next.alertIat);
+    if (next.lang != prev.lang) { i18n::set(next.lang); gauge_ui::invalidate(); }
+    ObdSource::setShownItems(next.panelItem);
     if (next.klineUart != prev.klineUart) {
         HondaKSource::setUart(next.klineUart);
         if (activeSrc == SRC_HONDA) g_reinitSrc = true;   // reconnect on the new pins
     }
     SimSource::hybrid = next.panels == PANELS_HYBRID;
     if (screen == SCR_GAUGE) {
-        if (next.theme != prev.theme) gauge_ui::setTheme(kThemes[next.theme]);
+        if (next.skin != prev.skin || next.theme != prev.theme) skinSetTheme(next.theme);
     } else if (repaint) {
         settings_ui::draw(settings);
     }
@@ -553,6 +612,7 @@ static void applySettings(const Settings &next, bool repaint) {
 static void openSettings() {
     screen = SCR_SETTINGS;
     SimSource::touchThrottle = 0;
+    settings_ui::openMain();
     settings_ui::draw(settings);
 }
 
@@ -581,9 +641,33 @@ static void openLink() {
     link_ui::invalidate();                         // drawn by loop() from the live link status
 }
 
+// ---- skin dispatch: the gauge screen renders via the selected skin --------------------------
+static void skinSetTheme(uint8_t theme) {
+    const Theme &t = kThemes[theme];
+    switch (settings.skin) {                       // each skin paints its full screen
+    case SKIN_DATA_WAVE: data_wave_ui::setTheme(t); break;
+    case SKIN_RACE_CODE: race_code_ui::setTheme(t); break;
+    default:             gauge_ui::setTheme(t);     break;
+    }
+}
+static void skinRender(const GaugeView &v) {
+    switch (settings.skin) {
+    case SKIN_DATA_WAVE: data_wave_ui::render(v); break;
+    case SKIN_RACE_CODE: race_code_ui::render(v); break;
+    default:             gauge_ui::render(v);     break;
+    }
+}
+static int skinLastPushed() {
+    switch (settings.skin) {
+    case SKIN_DATA_WAVE: return data_wave_ui::lastPushedRegions();
+    case SKIN_RACE_CODE: return race_code_ui::lastPushedRegions();
+    default:             return gauge_ui::lastPushedRegions();
+    }
+}
+
 static void closeSettings() {
     screen = SCR_GAUGE;
-    gauge_ui::setTheme(kThemes[settings.theme]);   // repaint background + all regions
+    skinSetTheme(settings.theme);   // repaint the active skin's background + all regions
 }
 
 static void repaintScreen() {                      // after something drew over the whole screen
@@ -593,7 +677,7 @@ static void repaintScreen() {                      // after something drew over 
         case SCR_LOG:      timer_ui::drawLog(runLog); break;
         case SCR_LINK:     link_ui::invalidate(); break;
         case SCR_BTSCAN:   scan_ui::invalidate(); break;
-        default:           gauge_ui::setTheme(kThemes[settings.theme]); break;
+        default:           skinSetTheme(settings.theme); break;
     }
 }
 
@@ -748,18 +832,24 @@ static void handleTouch() {
 
     if (!pressed && down) {
         down = false;
-        int panel = gauge_ui::hitPanel(sx, sy, g_view);
+        // DATA WAVE / RACE CODE have fixed panels and no link pill: only SETUP / the logo react.
+        const bool dataWave = settings.skin != SKIN_DEFAULT;
+        const bool setupHit = settings.skin == SKIN_RACE_CODE ? race_code_ui::hitSetup(sx, sy)
+                                                              : gauge_ui::hitSetup(sx, sy);
+        int panel = settings.skin == SKIN_DATA_WAVE ? data_wave_ui::hitRow(sx, sy)
+                  : settings.skin == SKIN_RACE_CODE ? race_code_ui::hitTile(sx, sy)
+                                                    : gauge_ui::hitPanel(sx, sy, g_view);
         if (!longDone && millis() - downAt < 600 && panel >= 0) {
             Settings s = settings;                       // tap a side panel: next value
             s.panelItem[panel] = gauge_ui::nextPanelItem(panel, g_view,
                                      activeSrc == SRC_OBD ? ObdSource::supportedItems() : 0);
             click();
             applySettings(s, false);
-        } else if (!longDone && millis() - downAt < 600 && gauge_ui::hitLink(sx, sy)) {
+        } else if (!longDone && millis() - downAt < 600 && !dataWave && gauge_ui::hitLink(sx, sy)) {
             click();
             openLink();                                  // HONDA K / OBD BT: the pill opens the link page
         } else if (!longDone && millis() - downAt < 600 &&
-                   (gauge_ui::hitSetup(sx, sy) || gauge_ui::hitStatus(sx, sy))) {
+                   (setupHit || gauge_ui::hitStatus(sx, sy))) {
             click();
             openSettings();
         }
@@ -834,6 +924,11 @@ void setup() {
     tft.invertDisplay(settings.invert);              // saved choice beats the build default
     tft.setRotation(1);
     tft.setSwapBytes(true);                          // canvas holds plain RGB565
+#if defined(ST7789_DRIVER)
+    Serial.printf("[tft] ST7789 %dx%d @ %d Hz\n", TFT_WIDTH, TFT_HEIGHT, SPI_FREQUENCY);
+#else
+    Serial.printf("[tft] ILI9341 %dx%d @ %d Hz\n", TFT_WIDTH, TFT_HEIGHT, SPI_FREQUENCY);
+#endif
     backlightBegin();
     setBacklight(settings.brightness);
     pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
@@ -857,6 +952,11 @@ void setup() {
     while (touch.Pressed()) delay(10);               // don't let the skip-tap reach the gauge
 
     gauge_ui::begin(pushToTft, kThemes[settings.theme]);
+    data_wave_ui::begin(pushToTft, kThemes[settings.theme]);
+    data_wave_ui::setUnits(settings.units);
+    race_code_ui::begin(pushToTft, kThemes[settings.theme]);
+    race_code_ui::setUnits(settings.units);
+    skinSetTheme(settings.theme);                       // active skin paints the screen last
     model.setShiftRpm(settings.shiftRpm);
     model.setPanels(settings.panels);
     model.setGearHidden(settings.gearMode == GEARMODE_OFF);
@@ -864,8 +964,16 @@ void setup() {
     model.setFuel(settings.fuel);
     gauge_ui::setPanelItems(settings.panelItem);
     gauge_ui::setFuelStoich(kFuels[settings.fuel].stoich);
-    ObdSource::setShownItems(settings.panelItem);
     ObdSource::setFuel(settings.fuel);
+    gauge_ui::setUnits(settings.units);
+    timer_ui::setUnits(settings.units);
+    dragTimer.setMph(settings.units != 0);
+    gauge_ui::setAlertsEnabled(settings.alerts);
+    gauge_ui::setTempIsOil(settings.source == SRC_HONDA && settings.hondaModel == HM_WAVE110);
+    HondaKSource::setPreferWave(settings.hondaModel == HM_WAVE110);
+    model.setAlertThresholds(settings.alertCoolant, settings.alertVoltLo / 10.0f, settings.alertIat);
+    i18n::set(settings.lang);
+    ObdSource::setShownItems(settings.panelItem);
     HondaKSource::setUart(settings.klineUart);
     SimSource::hybrid = settings.panels == PANELS_HYBRID;
     requestedSrc = settings.source;
@@ -912,9 +1020,9 @@ void loop() {
         scan_ui::render(now, settings);
         updateOutputs(nullptr);
     } else if (screen == SCR_GAUGE) {
-        gauge_ui::render(view);
+        skinRender(view);
         updateOutputs(&view);
-        pushes += gauge_ui::lastPushedRegions();
+        pushes += skinLastPushed();
     } else if (screen == SCR_TIMER) {
         // Timer sounds play even with BEEP off: they are the feedback this screen is for.
         static const char *const segNames[4] = { "0-100", "100-120", "120-160", "0-200" };
